@@ -1,2 +1,12 @@
+#!/usr/bin/env sh
+# Pre-commit gate: format + lint changed files only.
+#
+# The full Playwright + Electron test suite is intentionally NOT run
+# here. It needs a display server (xvfb on Linux) and Playwright's
+# Chromium prebuilds, neither of which is reliably present on a stock
+# Windows checkout, and it takes ~30s+ even when it works. Pre-commit
+# hooks should be fast and platform-agnostic.
+#
+# Tests run in CI on every push / PR to main — see
+# .github/workflows/playwright.yml.
 npx lint-staged
-npm test

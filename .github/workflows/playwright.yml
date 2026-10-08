@@ -11,8 +11,8 @@ jobs:
   test:
     strategy:
       matrix:
-        os: [ubuntu-latest]
-    timeout-minutes: 5
+        os: [ubuntu-22.04]
+    timeout-minutes: 20
     runs-on: ${{ matrix.os }}
     steps:
       - name: boost
@@ -21,24 +21,36 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: lts/*
+          node-version: 20
       - name: Install dependencies
         run: |
           # npm install
           npm ci
-      - name: Fix Ubuntu 24.04 issue https://github.com/electron/electron/issues/17972
+      - name: Verify Electron binary
+        # The build job installs Electron's binary fine on ubuntu-22.04 + Node
+        # 20; lts/* (Node 24) on ubuntu-latest did not — install.js silently
+        # no-opped, leaving no path.txt, so _electron.launch() died with
+        # "Electron failed to install correctly". The job above is now pinned
+        # to that proven environment; this step asserts the binary is really
+        # there and self-heals (forced clean re-extract) if it ever isn't.
         run: |
-          file=node_modules/electron/dist/chrome-sandbox
-          sudo chown root $file
-          sudo chmod 4755 $file
+          if ! node -e "require('electron')" >/dev/null 2>&1; then
+            echo "Electron binary missing after npm ci — forcing a clean reinstall"
+            rm -rf node_modules/electron/dist node_modules/electron/path.txt
+            DEBUG='@electron/get*' force_no_cache=true node node_modules/electron/install.js
+          fi
+          node -e "const p=require('electron'),fs=require('fs');console.log('electron ->',p);if(!fs.existsSync(p)){console.error('binary missing at',p);process.exit(1)}"
       - name: Build
         run: npm run build
-      - name: Install Playwright Browsers
-        run: npx playwright install --with-deps chromium
+      - name: Install Electron's system libraries
+        # The specs use _electron.launch() (the electron binary), not
+        # Playwright's bundled Chromium — so install only the Linux system
+        # libraries Electron needs (install-deps), NOT the 165 MB Chromium
+        # browser. That browser download hung ~18 min post-download and timed
+        # out the job; nothing here ever launches it.
+        run: npx playwright install-deps chromium
       - name: Run Playwright tests
         run: xvfb-run npm test
-        env:
-          DEBUG: pw:browser*
       - uses: actions/upload-artifact@v4
         if: ${{ !cancelled() }}
         with:

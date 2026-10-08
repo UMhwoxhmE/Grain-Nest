@@ -5,30 +5,30 @@
 
 ### General
 
-- **Node 20+:** [Node.js](https://nodejs.org). You can use the Node Version Manager (nvm):
-  - [nvm-windows](https://github.com/coreybutler/nvm-windows/releases) to download Node and change versions.
-- **Python 3.7.9 and up** You can use the Python Version Manager (pyenv):
-  - [pyenv-win](https://github.com/pyenv-win/pyenv-win) to download and change versions.
+Grain-Nest is built and used on macOS (Apple Silicon). The Playwright tests
+also run on Linux in CI.
+
+- **Node 20+:** [Node.js](https://nodejs.org), or `brew install node`.
+- **Python 3.7.9 and up** — only needed to rebuild native modules from source.
 - **RUST** setup rust via https://rustup.rs/ - mainly for used for plugins - currently not used in this repo.
-
-### WINDOWS
-
-- **Visual Studio with Desktop Development with C++ extension**
-  - Install VS2022 from https://visualstudio.microsoft.com/vs/features/cplusplus/
-  - or, as an administrator via `npm install --global windows-build-tools` (older VS version)
 
 ### MACOS
 
-[Install Homebrew](https://docs.brew.sh/Installation)
+[Install Homebrew](https://docs.brew.sh/Installation), then:
 ```shell
 xcode-select --install
 brew install boost
+brew install node    # or install Node 20+ from https://nodejs.org
 ```
 
-### LINUX
+Node.js 20+ is required to run `npm install` and the app from source. Boost
+and the Xcode command-line tools are only needed if you ever rebuild the
+native modules from source (`npm run rebuild-native`); the prebuilds
+shipped via npm work without them for typical use.
 
-Have a look in the workflow file:
-https://github.com/deepnest-next/deepnest/blob/main/.github/workflows/build.yml#L28
+### LINUX (CI tests only)
+
+See `.github/workflows/playwright.yml`:
 
 - gcc
 - clang
@@ -36,19 +36,24 @@ https://github.com/deepnest-next/deepnest/blob/main/.github/workflows/build.yml#
 
 ### Possible Problems
 
-- On Windows 10 1905 or newer, you might need to **disable the built-in Python launcher** via
-  - **Start** > "**Manage App Execution Aliases**" and turning off the "**App Installer" aliases for Python**"
 - close-and-open all command shells and your IDE to activate the latest setup
 
 ## Building
 
 ```sh
-git clone https://github.com/deepnest-next/deepnest
-cd deepnest
+git clone https://github.com/UMhwoxhmE/Grain-Nest
+cd Grain-Nest
 npm install
 npm run build
 npm run start
 ```
+
+### Transferring between platforms
+
+`node_modules/` is platform-specific (it contains a compiled Electron
+binary and native modules built for the host OS) and is gitignored for
+that reason. Don't copy it between machines; if a project folder arrives
+with one from another computer, delete it and run `npm install` again.
 
 ### Rebuild
 
@@ -95,30 +100,49 @@ npm run pw:codegen
 
 or
 
-Linux/MacOS:
 ```sh
 node ./helper_scripts/playwright_codegen.js
 ```
 
-or
+### Create the Mac app (Grain-Nest.app)
 
-Windows:
-```sh
-node .\helper_scripts\playwright_codegen.js
-```
-
-### Create a Distribution
+On an Apple Silicon Mac:
 
 ```sh
 npm run dist
 
-# During development, you can combine `clean-all, build-all and dist` via:
+# During development, you can combine `clean-all, build and dist` via:
 npm run dist-all
 ```
 
-The resulting files will be located in `.\deepnest-<version>-win32-x64`.
+The app is written to `out/Grain-Nest-darwin-arm64/Grain-Nest.app`, with
+the icon from `icon.icns`. It is ad-hoc signed (not signed with an Apple
+developer certificate), so the first launch needs the steps in
+[docs/USAGE.md](docs/USAGE.md#opening-the-mac-app-the-first-time).
 
-Create a zip file of this folder for a simple distribution.
+To share it as one file, make a disk image like the release does:
+
+```sh
+mkdir -p dmg && ditto out/Grain-Nest-darwin-arm64/Grain-Nest.app dmg/Grain-Nest.app
+ln -s /Applications dmg/Applications
+hdiutil create -volname Grain-Nest -srcfolder dmg -ov -format UDZO Grain-Nest.dmg
+```
+
+### Builds on GitHub
+
+- **Every change** (push to `main` or a pull request): `playwright.yml` runs
+  the tests on Linux.
+- **Mac app**: `build.yml` builds `Grain-Nest.app` (arm64) on a macOS
+  machine. It only runs when started by hand (Actions → *build* → *Run
+  workflow*; the disk image appears under *Artifacts* on the run page) or when a
+  release is published (a Mac app is only needed for a release).
+- **Releases**: publishing a GitHub release runs `build_release.yml`, which
+  builds the app and attaches `grain-nest-v<version>-macos-arm64.dmg` to the
+  release. Or run it by hand (Actions → *build release* → *Run workflow*)
+  with a version tag such as `v1.1.0`: it builds the app, creates that
+  release if it doesn't exist yet, and attaches the disk image. Bump `version` in
+  `package.json` to match first (`npm version 1.1.0 --no-git-tag-version`),
+  since the disk image is named after it.
 
 ## Debugging
 

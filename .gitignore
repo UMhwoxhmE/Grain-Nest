@@ -7,7 +7,6 @@
 /dist
 /bin
 /minkowski
-/deepnest-*win*x64
 git_token.rtf
 .idea
 *.zip
@@ -23,6 +22,11 @@ node_modules/
 /.env.local
 /output.log
 /_assets/embedded.*
+
+# TypeScript incremental-compile cache (created by tsc when
+# tsconfig.json has "incremental": true). Speeds up `npm start`
+# via the prestart hook but should never be committed.
+*.tsbuildinfo
 
 # Auto Claude data directory
 .auto-claude/

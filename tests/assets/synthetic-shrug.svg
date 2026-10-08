@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg"
+     xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
+     width="2850" height="4150" viewBox="0 0 2850 4150">
+  <!-- Stand-in for a real shrug pattern piece (shrug-nesting.spec.ts): one
+       big (about 30 x 43 in at 96 dpi), concave, all-curve outline with a
+       deep notch, and a diagonal grain line at 135.18 degrees. Drawn from
+       scratch; not taken from any pattern. -->
+  <g inkscape:label="1 Shrug C2">
+    <path d="M 1490.0,140.0 C 2390.0,185.0 2795.0,680.0 2750.0,1220.0 C 2705.0,1580.0 2210.0,1760.0 1850.0,2030.0 C 1580.0,2255.0 1670.0,2570.0 2120.0,2840.0 C 2660.0,3155.0 2750.0,3650.0 2300.0,3965.0 C 1670.0,4100.0 590.0,4010.0 275.0,3290.0 C 50.0,2570.0 50.0,1400.0 320.0,770.0 C 590.0,275.0 1040.0,122.0 1490.0,140.0 Z" fill="none" stroke="#000"/>
+    <line id="grain-1" x1="1681.1" y1="1391.8" x2="758.9" y2="2308.2" stroke="#888"/>
+  </g>
+</svg>

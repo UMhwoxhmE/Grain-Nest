@@ -38,6 +38,16 @@ export class SvgParser {
 		this.conf.endpointTolerance = Number(config.endpointTolerance);
 	}
 
+	// Mirror of deepnest.js's grainnestDebugEnabled — opt-in [grainnest]
+	// logging via window.GRAINNEST_DEBUG or env deepnest_debug=1. Lives
+	// on the parser so the tag-time log in detectGrainLines can call it
+	// without reaching across modules.
+	grainnestDebugEnabled(){
+		if(typeof window !== 'undefined' && window.GRAINNEST_DEBUG) return true;
+		if(typeof process !== 'undefined' && process.env && process.env.deepnest_debug === '1') return true;
+		return false;
+	}
+
 	load(dirpath, svgString, scale, scalingFactor){
 
 		if(!svgString || typeof svgString !== 'string'){
@@ -150,8 +160,28 @@ export class SvgParser {
 	// use the utility functions in this class to prepare the svg for CAD-CAM/nest related operations
 	cleanInput(dxfFlag){
 
+		// §phase-5r: strip non-rendered definition containers FIRST, so their
+		// geometry never reaches part extraction. A real pattern file carries
+		// 7,197 unused <clipPath> elements (Inkscape artifacts — nothing
+		// references them: 0 clip-path=, 0 <use>); without this they flatten
+		// to the top level and nest as junk "parts". Doing it before
+		// applyTransform also avoids transforming thousands of throwaway nodes.
+		this.removeDefsAndClips(this.svgRoot);
+
 		// apply any transformations, so that all path positions etc will be in the same coordinate space
 		this.applyTransform(this.svgRoot, '', false, dxfFlag);
+
+		// detect grain lines while <g> ancestors are still in place;
+		// matched elements are tagged with data-grainnest-grain="1" plus
+		// data-grainnest-grain-angle="<degrees>" so they survive the flatten
+		// and filter steps below.
+		this.detectGrainLines(this.svgRoot);
+
+		// §9.3.12 / phase-5r: resolve each piece's name from inkscape:label /
+		// <title> / id while the <g> ancestors are still in place, tagging it
+		// as data-grainnest-name so it survives the flatten below — which
+		// lifts pieces out of their labelled groups and drops inkscape: attrs.
+		this.detectPartNames(this.svgRoot);
 
 		// remove any g elements and bring all elements to the top level
 		this.flatten(this.svgRoot);
@@ -1255,6 +1285,241 @@ export class SvgParser {
 				element.parentElement.appendChild(element.children[0]);
 			}
 		}
+	}
+
+	// Walk the SVG tree (with <g> ancestors still in place) and tag elements
+	// that look like grain lines per the brief's three rules:
+	//   1. class contains 'grainline' (Seamly2D)
+	//   2. ancestor <g> has inkscape:label='grain' (case-insensitive) or id='grain'
+	//   3. own inkscape:label='grainline' or id contains 'grain' (case-insensitive)
+	// Tagged with data-grainnest-grain="1" and data-grainnest-grain-angle="<deg>".
+	detectGrainLines(element, ancestorIsGrainGroup){
+		ancestorIsGrainGroup = !!ancestorIsGrainGroup;
+
+		// Update the ancestor flag if this element is itself an
+		// Inkscape "grain" group (rule 2).
+		var isGrainGroup = false;
+		if(element.tagName === 'g'){
+			var label = (element.getAttribute('inkscape:label') || '').toLowerCase();
+			var gid = (element.getAttribute('id') || '').toLowerCase();
+			if(label === 'grain' || gid === 'grain'){
+				isGrainGroup = true;
+			}
+		}
+		var withinGrainGroup = ancestorIsGrainGroup || isGrainGroup;
+
+		// Recurse first so all children are checked.
+		var children = Array.prototype.slice.call(element.children);
+		for(var i = 0; i < children.length; i++){
+			this.detectGrainLines(children[i], withinGrainGroup);
+		}
+
+		// Test this element. <g> elements themselves are skipped — only the
+		// geometric children inside a grain group are marked.
+		if(element.tagName === 'g' || element.tagName === 'svg' || element.tagName === 'defs'){
+			return;
+		}
+
+		var classAttr = (element.getAttribute('class') || '').toLowerCase();
+		var elLabel = (element.getAttribute('inkscape:label') || '').toLowerCase();
+		var elId = (element.getAttribute('id') || '').toLowerCase();
+
+		var isGrain = false;
+		if(/(^|\s)grainline(\s|$)/.test(classAttr)) isGrain = true;     // rule 1
+		else if(withinGrainGroup) isGrain = true;                         // rule 2
+		else if(elLabel === 'grainline' || elId.indexOf('grain') !== -1) isGrain = true; // rule 3
+
+		if(!isGrain) return;
+
+		// Compute angle from the element geometry. Only handle the simple
+		// two-point cases (the brief's MVP); anything else is ignored.
+		var angle = this.grainElementAngle(element);
+		if(angle === null){
+			console.warn('grain detection: could not extract angle from', element.tagName, element);
+			return;
+		}
+
+		element.setAttribute('data-grainnest-grain', '1');
+		element.setAttribute('data-grainnest-grain-angle', String(angle));
+		if(this.grainnestDebugEnabled && this.grainnestDebugEnabled()){
+			console.log(
+				'[grainnest] tagged grain',
+				element.tagName,
+				'id=' + (element.getAttribute('id') || ''),
+				'class=' + (element.getAttribute('class') || ''),
+				'angle=' + angle
+			);
+		}
+		// Inline !important style so the dashed-cyan rendering survives
+		// every #parts/#imports/#nestdisplay svg *.active / dark-mode
+		// override that's defined later in the stylesheet. CSS specificity
+		// alone is unreliable here — there are too many layered rules.
+		var existing = element.getAttribute('style') || '';
+		var grainStyle = 'stroke: #24c7ed !important; stroke-dasharray: 6 3 !important; stroke-width: 1.2px !important; fill: none !important; fill-opacity: 0 !important;';
+		element.setAttribute('style', existing ? existing.replace(/;\s*$/, '') + '; ' + grainStyle : grainStyle);
+	}
+
+	// §9.3.12 / phase-5r: walk the tree (before flatten) and tag each piece's
+	// geometry element with data-grainnest-name, resolved from the source SVG
+	// the same way extractPartName does — own inkscape:label, then a non-layer
+	// ancestor <g> label, then a <title> child, then a meaningful id. Stashing
+	// it as a data- attribute (like the grain tag) lets the name survive the
+	// flatten, which strips inkscape: attrs and the <g> ancestors. Grain
+	// elements (already tagged) and containers are skipped.
+	detectPartNames(element){
+		var AUTO_ID = /^(path|g|rect|svg|polygon|polyline|use|circle|ellipse|line|tspan|text|defs|image|clip|mask)\d+$/i;
+		function isLayer(n){ return !!(n.getAttribute && n.getAttribute('inkscape:groupmode') === 'layer'); }
+		function resolveName(el){
+			var n, hops;
+			for(n = el, hops = 0; n && n.getAttribute && n.tagName !== 'svg' && hops < 6; n = n.parentElement, hops++){
+				if(isLayer(n)) continue;
+				var label = n.getAttribute('inkscape:label');
+				if(label && label.trim()) return label.trim();
+			}
+			if(el.children){
+				for(var k = 0; k < el.children.length; k++){
+					var c = el.children[k];
+					if(c.tagName && String(c.tagName).toLowerCase() === 'title' && c.textContent && c.textContent.trim()) return c.textContent.trim();
+				}
+			}
+			for(n = el, hops = 0; n && n.getAttribute && n.tagName !== 'svg' && hops < 6; n = n.parentElement, hops++){
+				if(isLayer(n)) continue;
+				var id = n.getAttribute('id');
+				if(id && id.trim() && !AUTO_ID.test(id.trim())) return id.trim();
+			}
+			return null;
+		}
+		// §phase-5r: id of the nearest non-layer <g> ancestor — the "piece
+		// group". A grain line and its outline are siblings in this group, so
+		// getParts can attach an edge-drawn grain to its piece by shared group
+		// instead of geometry (which fails when Inkscape transforms bake the
+		// grain's position off the piece — testing round 4 / cut-on-fold).
+		function resolveGroup(el){
+			for(var n = el.parentElement, hops = 0; n && n.getAttribute && n.tagName !== 'svg' && hops < 6; n = n.parentElement, hops++){
+				if(n.tagName === 'g' && !isLayer(n)){
+					var gid = n.getAttribute('id');
+					if(gid && gid.trim()) return gid.trim();
+				}
+			}
+			return null;
+		}
+
+		var children = Array.prototype.slice.call(element.children);
+		for(var i = 0; i < children.length; i++){
+			this.detectPartNames(children[i]);
+		}
+
+		if(element.tagName === 'g' || element.tagName === 'svg' || element.tagName === 'defs' || element.tagName === 'title') return;
+		if(!element.getAttribute) return;
+		// Tag the piece-group on every geometry element (grains included, so
+		// the grain-skip below doesn't bypass it).
+		if(!element.getAttribute('data-grainnest-group')){
+			var grp = resolveGroup(element);
+			if(grp) element.setAttribute('data-grainnest-group', grp);
+		}
+		if(element.getAttribute('data-grainnest-grain') === '1') return; // a grain line, not a piece (name skip)
+		if(element.getAttribute('data-grainnest-name')) return;
+		var name = resolveName(element);
+		if(name) element.setAttribute('data-grainnest-name', name);
+	}
+
+	// §phase-5r: recursively remove non-rendered definition containers —
+	// <defs>/<clipPath>/<mask>/<symbol>/<marker>/<pattern>. Their contents are
+	// only ever *referenced* (clips, gradients, markers, <use>), never a piece
+	// to nest, and SVG never renders them directly. Removing the whole subtree
+	// before flatten stops e.g. a <clipPath>'s <path> from being lifted to the
+	// top level and nested as junk. A real pattern file carries 7,197 unused
+	// <clipPath>s (round 4) — this is what made the parts list thousands of
+	// entries instead of ~25.
+	removeDefsAndClips(element){
+		var SKIP = { defs: true, clippath: true, mask: true, symbol: true, marker: true, pattern: true };
+		var children = Array.prototype.slice.call(element.children);
+		for(var i = 0; i < children.length; i++){
+			var child = children[i];
+			var tag = (child.tagName || '').toLowerCase();
+			if(SKIP[tag]){
+				if(child.parentNode) child.parentNode.removeChild(child);
+			} else {
+				this.removeDefsAndClips(child);
+			}
+		}
+	}
+
+	// §phase-5r: parse the first and last on-path points straight from a
+	// path's `d` string — no pathSegList (unreliable before splitPath). Handles
+	// the only kind of path a grain/fold line ever is: a straight line in any
+	// of Inkscape's forms (absolute/relative M, L, H, V, plus the implicit
+	// lineto after a moveto). Returns {x1,y1,x2,y2}, or null for anything with
+	// curves/arcs.
+	pathEndpoints(d){
+		var tokens = (d || '').match(/[MmLlHhVvZzCcSsQqTtAa]|[-+]?(?:\d*\.\d+|\d+)(?:[eE][-+]?\d+)?/g);
+		if(!tokens) return null;
+		var i = 0, cmd = '', x = 0, y = 0, fx = null, fy = null;
+		var next = function(){ return parseFloat(tokens[i++]); };
+		while(i < tokens.length){
+			if(/^[A-Za-z]$/.test(tokens[i])){ cmd = tokens[i++]; }
+			else if(cmd === 'M'){ cmd = 'L'; }   // implicit lineto after abs moveto
+			else if(cmd === 'm'){ cmd = 'l'; }   // implicit lineto after rel moveto
+			var u = cmd.toUpperCase();
+			var rel = (cmd !== u);
+			if(u === 'M' || u === 'L'){
+				var ax = next(), ay = next();
+				if(isNaN(ax) || isNaN(ay)) return null;
+				x = rel ? x + ax : ax;
+				y = rel ? y + ay : ay;
+			} else if(u === 'H'){
+				var hx = next(); if(isNaN(hx)) return null;
+				x = rel ? x + hx : hx;
+			} else if(u === 'V'){
+				var vy = next(); if(isNaN(vy)) return null;
+				y = rel ? y + vy : vy;
+			} else if(u === 'Z'){
+				/* closepath — no new point */
+			} else {
+				return null; // C/S/Q/T/A — not a straight grain line
+			}
+			if(fx === null){ fx = x; fy = y; }
+		}
+		if(fx === null) return null;
+		return { x1: fx, y1: fy, x2: x, y2: y };
+	}
+
+	// Return the angle in degrees (0-360) of a two-point grain element,
+	// or null if it isn't recognisable as a simple straight line.
+	grainElementAngle(element){
+		var x1, y1, x2, y2;
+		if(element.tagName === 'line'){
+			x1 = parseFloat(element.getAttribute('x1'));
+			y1 = parseFloat(element.getAttribute('y1'));
+			x2 = parseFloat(element.getAttribute('x2'));
+			y2 = parseFloat(element.getAttribute('y2'));
+		} else if(element.tagName === 'polyline' || element.tagName === 'polygon'){
+			var pts = (element.getAttribute('points') || '').trim().split(/[\s,]+/).map(parseFloat);
+			if(pts.length < 4 || pts.some(isNaN)) return null;
+			x1 = pts[0]; y1 = pts[1]; x2 = pts[2]; y2 = pts[3];
+		} else if(element.tagName === 'path'){
+			// Parse the endpoints straight from the `d` string. polygonifyPath
+			// was unreliable here because it depends on pathSegList, which
+			// isn't populated this early (before splitPath runs) — so real
+			// <path> grain lines weren't detecting at all. A direct parse
+			// handles any straight-line path, including Inkscape's relative
+			// output "m … v …". (§9.1 / phase-5r.)
+			var ep = this.pathEndpoints(element.getAttribute('d') || '');
+			if(!ep) return null;
+			x1 = ep.x1; y1 = ep.y1; x2 = ep.x2; y2 = ep.y2;
+		} else {
+			return null;
+		}
+		if(!isFinite(x1) || !isFinite(y1) || !isFinite(x2) || !isFinite(y2)) return null;
+		if(x1 === x2 && y1 === y2) return null;
+
+		var radians = Math.atan2(y2 - y1, x2 - x1);
+		var degrees = radians * 180 / Math.PI;
+		// Normalize to [0, 360). The grain has no head/tail so a 200° line
+		// is the same as a 20° line — fold to [0, 180).
+		degrees = ((degrees % 360) + 360) % 360;
+		if(degrees >= 180) degrees -= 180;
+		return degrees;
 	}
 
 	// remove all elements with tag name not in the whitelist

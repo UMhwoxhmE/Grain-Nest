@@ -130,6 +130,12 @@ h3 {
   filter: brightness(0.6) invert(100%);
 }
 
+/* The home tab shows the colour logo: don't invert it like the line icons. */
+#sidenav #home_tab.active {
+  background-color: #fff;
+  filter: none;
+}
+
 #sidenav #home_tab {
   height: calc(var(--nav-width) - 0.625em);
   background-image: url(img/logosmall.svg);
@@ -230,6 +236,37 @@ h3 {
 
 .topnav li {
   -webkit-app-region: no-drag;
+}
+
+/* §9.3.4: nap (directional) checkbox sits inline in the topnav.
+   Aligned with the .button items by reusing similar vertical
+   margin; smaller text and no background so it reads as a control,
+   not a button. */
+.topnav li.topnav-checkbox {
+  display: inline-flex;
+  align-items: center;
+  list-style: none;
+  margin: 0.78em 0 0 1.25em;
+  font-size: 0.875em;
+  color: var(--text-primary, #333);
+}
+
+.topnav li.topnav-checkbox label {
+  display: inline-flex;
+  align-items: center;
+  cursor: pointer;
+}
+
+.topnav li.topnav-checkbox input[type="checkbox"] {
+  margin: 0 0.4em 0 0;
+}
+
+/* §9.3.10: warp-direction select sits in the same .topnav-checkbox
+   container as the nap checkbox; small padding so it doesn't crowd
+   the label. */
+.topnav li.topnav-checkbox select {
+  margin-left: 0.4em;
+  font-size: inherit;
 }
 
 .button {
@@ -423,7 +460,11 @@ ul.dropdown li:hover {
   background-color: var(--table-bg);
   border-right: 0.2em solid var(--border-color);
   width: 32em;
-  height: 100%;
+  /* Fit below the full-width .topnav on #homecontent's second flex-wrap line
+     — height:100% here was a full viewport tall, so the bottom (#partstools)
+     overflowed past the screen and got clipped by #homecontent's
+     overflow:hidden, which the old #partstools `bottom:` shift hid. (§9.0.1 #4) */
+  height: calc(100% - var(--nav-width) + 0.625em);
   overflow: hidden; /* Keep hidden - this prevents double scrollbars */
   box-sizing: border-box;
   position: relative;
@@ -438,10 +479,13 @@ ul.dropdown li:hover {
 /* Make sure #partscroll takes available space and shows scrollbars when needed */
 #partscroll {
   flex: 1;
+  /* min-height:0 lets this flex item shrink below its content so its own
+     scrollbars engage, instead of growing the column and pushing the last
+     rows down behind #partstools. Replaces the old margin-bottom hack. */
+  min-height: 0;
   overflow-y: auto;
-  overflow-x: hidden;
+  overflow-x: auto;
   position: relative;
-  margin-bottom: calc(100% - calc(28em)); /* Leave space for #partstools */
 }
 
 #imports {
@@ -600,28 +644,54 @@ ul.dropdown li:hover {
   animation: dash 3s linear forwards;
 }
 
-/* info page */
+/* info page. border-box so the side padding stays inside the page's
+   width (it used to push the text off the right edge), and it scrolls when
+   the window is short. */
 #info {
+  box-sizing: border-box;
   height: 100%;
+  overflow-y: auto;
   background-color: var(--bg-secondary);
-  padding: 0 5%;
+  padding: 0 5% 3em 5%;
   min-width: 22em;
   flex: 1;
 }
 
-#info.active svg g.logo path,
-#info.active svg g.logo line,
-#info.active svg g.logo rect,
-#info.active svg g.logo circle {
-  stroke-dasharray: 1000;
-  stroke-dashoffset: 1000;
-  animation: dash 5s linear forwards;
+#info .info-text {
+  max-width: 38em;
+  margin: 0 auto;
+  text-align: left;
+  line-height: 1.5;
 }
 
-#info.active svg path.fill {
-  stroke-dasharray: 1000;
-  stroke-dashoffset: 1000;
-  animation: dash 20s linear forwards;
+#info .info-text h1 {
+  margin: 0 0 0.2em 0;
+  font-size: 3em;
+  color: #24c7ed;
+  text-align: center;
+}
+
+#info .info-version {
+  text-align: center;
+  margin-top: 0;
+}
+
+#info .info-text h2 {
+  margin: 1.5em 0 0.4em 0;
+  font-size: 1.1em;
+}
+
+#info .info-licences {
+  padding-left: 1.2em;
+}
+
+#info .info-licences li {
+  margin-bottom: 0.4em;
+}
+
+#info .info-small {
+  font-size: 0.9em;
+  opacity: 0.8;
 }
 
 @keyframes dash {
@@ -640,13 +710,125 @@ ul.dropdown li:hover {
 /* part table */
 #parts table {
   width: 100%;
-  min-width: 28em;
+  min-width: 36em;
   margin: 0;
   padding: 0;
   color: var(--text-secondary);
   border-collapse: collapse;
   cursor: default;
   font-size: 0.9em;
+}
+
+/* §9.0.1 / phase-5w: drag-to-resize parts-list columns. The table keeps its
+   natural auto layout by default (so a relaunch always restores the original,
+   never-messed-up widths — deliberately NOT persisted). On the first drag the
+   JS "freezes" the current widths into the <colgroup> and adds `.cols-frozen`,
+   switching to table-layout:fixed so the <col> widths become authoritative; the
+   JS then sets the table's explicit width to their sum, so a widened column
+   grows the table (horizontal scroll via #partscroll) rather than squeezing its
+   neighbours. min-width:0 defeats the generic `#parts table` 36em floor. */
+#parts table#partslist.cols-frozen {
+  table-layout: fixed;
+  min-width: 0;
+}
+/* th is the positioning context for the resize grip (needed before freeze too) */
+#parts table#partslist thead tr th {
+  position: relative;
+}
+/* once frozen, a too-narrow header ellipsises instead of forcing the column
+   wider, and the name field fills its column so widening it shows more. */
+#parts table#partslist.cols-frozen thead tr th span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+#parts table#partslist.cols-frozen tbody tr td .partname {
+  width: 100%;
+  box-sizing: border-box;
+}
+.col-resizer {
+  position: absolute;
+  top: 0;
+  right: -3px;
+  width: 7px;
+  height: 100%;
+  cursor: col-resize;
+  z-index: 6;
+  user-select: none;
+  touch-action: none;
+}
+.col-resizer:hover,
+.col-resizer.col-resizer-active {
+  background-color: var(--table-active);
+  opacity: 0.6;
+}
+
+/* Grain-rule dropdown column — keep narrow, dark-mode friendly */
+#parts table tbody tr td select {
+  background-color: transparent;
+  color: var(--text-primary);
+  border: 1px solid var(--border-color);
+  font-size: 0.95em;
+  padding: 0.15em 0.3em;
+  max-width: 9em;
+}
+
+#parts table tbody tr td select:focus {
+  outline: 1px solid var(--accent, #24c7ed);
+}
+
+/* Phase 4: small inline "Mark grain" link shown next to the dropdown
+   when a piece needs manual marking. */
+#parts table tbody tr td .markgrain {
+  display: inline-block;
+  margin-left: 0.4em;
+  padding: 0.1em 0.5em;
+  font-size: 0.85em;
+  color: var(--text-primary);
+  border: 1px solid #24c7ed;
+  border-radius: 3px;
+  text-decoration: none;
+}
+
+#parts table tbody tr td .markgrain:hover {
+  background-color: #24c7ed;
+  color: #fff;
+}
+
+/* Phase 4: marking-mode banner. Slides into view at the top when the user
+   clicks "Mark grain", instructs them to click two points, offers cancel.
+   Hidden by default; revealed by the .active class. */
+#grainmarker-banner {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 100;
+  background-color: #24c7ed;
+  color: #14181b;
+  padding: 0.6em 1em;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  gap: 1em;
+  font-size: 0.95em;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+}
+
+#grainmarker-banner.active {
+  display: flex;
+}
+
+#grainmarker-banner .button {
+  background-color: #14181b;
+  color: #fff;
+  padding: 0.25em 0.8em;
+  border-radius: 3px;
+  text-decoration: none;
+}
+
+#grainmarker-banner .button:hover {
+  background-color: #000;
 }
 
 #parts table thead {
@@ -729,6 +911,16 @@ ul.dropdown li:hover {
   color: #000;
 }
 
+/* §9.3.2: the inline row links (Mirror / Mirror copy / Cut on fold /
+   Mark grain) inherit the global `a` cyan (#24c7ed), which is the same
+   colour as the active-row highlight — so a selected row's links go
+   invisible. Force them to the primary text colour on active rows
+   (dark on the light highlight, white in dark mode). */
+#parts table tbody tr.active td .mirror,
+#parts table tbody tr.active td .markgrain {
+  color: var(--text-primary);
+}
+
 #parts table input[type="text"],
 #parts table input[type="number"] {
   background-color: transparent;
@@ -780,66 +972,58 @@ body.dark-mode #parts table tbody tr td input[type="number"]:focus {
   stroke-linejoin: round !important;
 }
 
+/* Grain lines (Phase 3): see the rules at the bottom of this file —
+   moved there so they win source-order tiebreaks against later overrides
+   like `#imports svg *.active` and `body.dark-mode #parts table svg *`. */
+
 #parts table tbody tr.active svg * {
   stroke: #fff !important;
 }
 
-/* parts tools */
+/* parts tools — v1.1.1: one compact toolbar under the parts list.
+   Groups wrap onto extra lines only when the panel is too narrow. The Add
+   sheet dialog opens as a centred pop-up (below), not inside this panel. */
 #partstools {
   position: relative;
-  bottom: calc(var(--nav-width) - 0.625em);
   width: 100%;
-  height: calc(var(--nav-width) - 0.625em);
   background-color: var(--progress-bg);
-  transition: height 0.5s;
-  display: flex;
-  align-items: center;
-  justify-content: space-around;
   flex-shrink: 0; /* Prevent shrinking */
-}
-#partstools > div {
-  position: relative;
-  display: flex;
-  align-items: flex-start;
-  justify-content: center;
-  top: -4px; /* Adjust for top border */
-}
-/* Style buttons to be side by side */
-#partstools > div > a {
-  display: flex; /* Use flex instead of inline-flex */
-  margin-right: 15px; /* More space between buttons */
+  padding: 6px 10px;
+  box-sizing: border-box;
 }
 
-/* When active (showing sheet dialog), switch to block layout */
-#partstools.active {
-  height: 17em;
-  display: block; /* Switch to block layout when showing dialogs */
-  padding-top: 10px; /* Add some top padding when in active mode */
+/* Add sheet pop-up: dims the window behind it. #parts is a stacking context
+   (z-index:5), so lift it above the imports panel while the pop-up is open. */
+#parts:has(#partstools.active) {
+  z-index: 100;
 }
-
-/* Preserve spacing in active state */
-#partstools.active > div > a {
-  /*display: inline-block;*/ /* Display as inline-block in active state */
-  margin-left: 1.25em;
-  margin-bottom: 10px; /* Add some bottom margin in active state */
-}
-
-#sheetdialog {
-  margin: 0 1.5em 1.5em 1.5em;
-  display: block; /* Change to block to match original */
-  width: auto; /* Allow natural width */
-}
-#partstools.active > a {
-  display: inline-block; /* Display as inline-block in active state */
-  margin-left: 1.25em;
-  margin-bottom: 10px; /* Add some bottom margin in active state */
+#partstools.active::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  z-index: 999;
 }
 #partstools #sheetdialog {
   display: none;
 }
-
 #partstools.active #sheetdialog {
   display: block;
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 1000;
+  min-width: 22em;
+  margin: 0;
+  padding: 1.25em 1.5em 1.5em;
+  background-color: var(--bg-secondary, #fff);
+  color: var(--text-primary, #333);
+  border-radius: 8px;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.45);
+}
+#sheetdialog h2 {
+  margin: 0 0 0.5em;
 }
 
 #sheetdialog .row {
@@ -867,6 +1051,7 @@ body.dark-mode #parts table tbody tr td input[type="number"]:focus {
   padding-left: 2em;
   padding-right: 2em;
   margin-top: 1em;
+  margin-right: 0.5em;
 }
 
 #sheetdialog input {
@@ -1212,6 +1397,24 @@ body.dark-mode #parts table tbody tr td input[type="number"]:focus {
 
 .nest i:last-child {
   margin: 0;
+}
+
+/* §9.0.1 R6-A: per-row fabric-length pill on the (fabric-ranked) nest list */
+.nest {
+  position: relative;
+}
+.nest_length {
+  position: absolute;
+  top: 50%;
+  right: 0.4em;
+  transform: translateY(-50%);
+  font-size: 0.75em;
+  line-height: 1.6;
+  padding: 0 0.5em;
+  color: #fff;
+  background: rgba(0, 0, 0, 0.55);
+  border-radius: 0.8em;
+  pointer-events: none;
 }
 
 /* fade out nests */
@@ -1836,4 +2039,128 @@ body.dark-mode #presetName {
 /* Prevent interaction while modal is shown */
 .modal-open {
   overflow: hidden;
+}
+
+/* ============================================================================
+   Grain-line styling (Phase 3 + Phase 4)
+   Placed at the very end of the file so it wins source-order tiebreaks
+   against all the earlier `svg *` and `*.active` overrides. The duplicated
+   selectors give explicit higher specificity for the cases where another
+   rule has tied specificity (e.g. `#imports svg *.active` is (1,1,2) and
+   ties with `#imports svg [data-grainnest-grain="1"]`).
+   The grain line is also given an inline style at creation time as a
+   final safety net, so even unforeseen overrides can't beat it.
+   ============================================================================ */
+[data-grainnest-grain="1"],
+[data-grainnest-grain="1"].active,
+[data-grainnest-grain="1"].error,
+.active[data-grainnest-grain="1"],
+.error[data-grainnest-grain="1"] {
+  stroke: #24c7ed !important;
+  stroke-dasharray: 6 3 !important;
+  stroke-width: 1.2px !important;
+  fill: none !important;
+  fill-opacity: 0 !important;
+}
+
+/* v1.1.1: the toolbar's groups (selection | apply to selected | qty/seam)
+   flow left to right and wrap as whole groups on a narrow panel. */
+#partstoolsgrid {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 18px;
+  font-size: 12px;
+}
+#partstoolsgrid .pt-group {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+#partstoolsgrid .button {
+  margin: 0;
+  padding: 0.35em 0.9em;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+#partstoolsgrid .bulkactions-label {
+  opacity: 0.8;
+  white-space: nowrap;
+}
+#partstoolsgrid select,
+#partstoolsgrid input[type="number"] {
+  font-size: 12px;
+}
+#partstoolsgrid input[type="number"] {
+  width: 64px;
+}
+#partstoolsgrid .resetlayout {
+  margin-left: auto;
+  opacity: 0.7;
+  font-size: 11px;
+  white-space: nowrap;
+  color: inherit;
+}
+#partstoolsgrid .resetlayout:hover {
+  opacity: 1;
+}
+
+/* v1.1.1: inputs in the parts table fill their column, so narrowing a
+   column (Quantity, Seam) shrinks its box instead of spilling over the next
+   column. */
+#parts table#partslist td input[type="number"],
+#parts table#partslist td input.partname {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+/* phase-r8a: pieces left out of the nest stay in the list, greyed out. The
+   tick box itself stays fully visible so it's obvious how to bring them back. */
+#parts table#partslist tbody tr.excluded td > * {
+  opacity: 0.45;
+}
+#parts table#partslist tbody tr.excluded td > input.includetoggle {
+  opacity: 1;
+}
+#parts table#partslist tbody tr td input.includetoggle {
+  cursor: pointer;
+}
+
+/* phase-r8c: the "top of the piece" arrow in each parts-table thumbnail.
+   Needs the id-level selector + !important to beat `#parts table svg *`. */
+#parts table svg .toparrow line,
+#parts table svg .toparrow polygon {
+  stroke: #e0662e !important;
+  stroke-width: 2px !important;
+}
+#parts table svg .toparrow polygon {
+  fill: #e0662e !important;
+  fill-opacity: 1 !important;
+}
+
+/* v1.1.2: the per-row actions get their own column, as compact
+   buttons kept on one line (they used to wrap into a jumble beside the
+   Grain rule drop-down). */
+#parts table#partslist td.rowactions {
+  white-space: nowrap;
+}
+#parts table#partslist td.rowactions a.mirror {
+  display: inline-block;
+  margin: 2px 4px 2px 0;
+  padding: 2px 8px;
+  border: 1px solid currentColor;
+  border-radius: 10px;
+  font-size: 0.85em;
+  line-height: 1.4;
+  text-decoration: none;
+}
+#parts table#partslist td .markgrain {
+  white-space: nowrap;
+}
+/* v1.2.0: the sheet name box in the Add a sheet pop-up needs room. */
+#sheetdialog input#sheetname {
+  width: 12em;
 }

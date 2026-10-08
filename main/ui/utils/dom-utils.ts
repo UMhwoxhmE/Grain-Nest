@@ -33,7 +33,7 @@ export function documentReady(callback: () => void): void {
  */
 export function getElement<T extends Element = Element>(
   selector: string,
-  parent: Document | Element = document
+  parent: Document | Element = document,
 ): T | null {
   return parent.querySelector<T>(selector);
 }
@@ -50,7 +50,7 @@ export function getElement<T extends Element = Element>(
  */
 export function getElements<T extends Element = Element>(
   selector: string,
-  parent: Document | Element = document
+  parent: Document | Element = document,
 ): NodeListOf<T> {
   return parent.querySelectorAll<T>(selector);
 }
@@ -64,7 +64,7 @@ export function getElements<T extends Element = Element>(
  * const form = getElementById<HTMLFormElement>('config-form');
  */
 export function getElementById<T extends HTMLElement = HTMLElement>(
-  id: string
+  id: string,
 ): T | null {
   return document.getElementById(id) as T | null;
 }
@@ -81,7 +81,7 @@ export function getElementById<T extends HTMLElement = HTMLElement>(
  * svg.appendChild(rect);
  */
 export function createSvgElement<K extends keyof SVGElementTagNameMap>(
-  tagName: K
+  tagName: K,
 ): SVGElementTagNameMap[K];
 export function createSvgElement(tagName: string): SVGElement;
 export function createSvgElement(tagName: string): SVGElement {
@@ -98,7 +98,7 @@ export function createSvgElement(tagName: string): SVGElement {
  * div.className = 'container';
  */
 export function createHtmlElement<K extends keyof HTMLElementTagNameMap>(
-  tagName: K
+  tagName: K,
 ): HTMLElementTagNameMap[K] {
   return document.createElement(tagName);
 }
@@ -141,7 +141,7 @@ export function removeClass(element: Element, className: string): void {
 export function toggleClass(
   element: Element,
   className: string,
-  force?: boolean
+  force?: boolean,
 ): boolean {
   return element.classList.toggle(className, force);
 }
@@ -174,7 +174,7 @@ export function hasClass(element: Element, className: string): boolean {
  */
 export function setAttributes(
   element: Element,
-  attributes: Record<string, string>
+  attributes: Record<string, string>,
 ): void {
   for (const [name, value] of Object.entries(attributes)) {
     element.setAttribute(name, value);
@@ -189,10 +189,7 @@ export function setAttributes(
  * @example
  * removeAttribute(element, 'style');
  */
-export function removeAttribute(
-  element: Element,
-  attributeName: string
-): void {
+export function removeAttribute(element: Element, attributeName: string): void {
   element.removeAttribute(attributeName);
 }
 
@@ -207,7 +204,7 @@ export function removeAttribute(
  */
 export function getDataAttribute(
   element: Element,
-  dataKey: string
+  dataKey: string,
 ): string | null {
   return element.getAttribute(`data-${dataKey}`);
 }
@@ -224,7 +221,7 @@ export function getDataAttribute(
 export function setDataAttribute(
   element: Element,
   dataKey: string,
-  value: string
+  value: string,
 ): void {
   element.setAttribute(`data-${dataKey}`, value);
 }
@@ -308,7 +305,7 @@ export function cloneSvgElementDeep<T extends SVGElement>(element: T): T {
 export function setVisible(
   element: HTMLElement,
   visible: boolean,
-  displayValue: string = "block"
+  displayValue: string = "block",
 ): void {
   element.style.display = visible ? displayValue : "none";
 }
@@ -326,7 +323,7 @@ export function setVisible(
 export function setStyle(
   element: HTMLElement,
   property: keyof CSSStyleDeclaration,
-  value: string
+  value: string,
 ): void {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   (element.style as any)[property] = value;
@@ -346,7 +343,7 @@ export function setStyle(
  */
 export function setStyles(
   element: HTMLElement,
-  styles: Partial<CSSStyleDeclaration>
+  styles: Partial<CSSStyleDeclaration>,
 ): void {
   Object.assign(element.style, styles);
 }
@@ -366,7 +363,7 @@ export function addListener<K extends keyof HTMLElementEventMap>(
   element: HTMLElement,
   eventType: K,
   handler: (event: HTMLElementEventMap[K]) => void,
-  options?: AddEventListenerOptions
+  options?: AddEventListenerOptions,
 ): void {
   element.addEventListener(eventType, handler, options);
 }
@@ -383,7 +380,7 @@ export function addListener<K extends keyof HTMLElementEventMap>(
 export function removeListener<K extends keyof HTMLElementEventMap>(
   element: HTMLElement,
   eventType: K,
-  handler: (event: HTMLElementEventMap[K]) => void
+  handler: (event: HTMLElementEventMap[K]) => void,
 ): void {
   element.removeEventListener(eventType, handler);
 }
@@ -439,7 +436,7 @@ export function setInnerText(element: HTMLElement, text: string): void {
  */
 export function getComputedStyleValue(
   element: Element,
-  property: string
+  property: string,
 ): string {
   return window.getComputedStyle(element).getPropertyValue(property);
 }
@@ -459,7 +456,7 @@ export function createViewBox(
   x: number,
   y: number,
   width: number,
-  height: number
+  height: number,
 ): string {
   return `${x} ${y} ${width} ${height}`;
 }
@@ -490,11 +487,39 @@ export function createTranslate(x: number, y: number): string {
 export function createCssTransform(
   x: number,
   y: number,
-  rotation?: number
+  rotation?: number,
 ): string {
   let transform = `translate(${x}px, ${y}px)`;
   if (rotation !== undefined && rotation !== 0) {
     transform += ` rotate(${rotation}deg)`;
   }
   return transform;
+}
+
+/**
+ * §9.3.2 behaviour 3: SVG `transform` string that reflects across the
+ * fold line (a point + angle in radians, in piece coordinates). A
+ * cut-on-fold piece is drawn as its half svgelements plus a second copy
+ * wrapped in this transform, giving the doubled visual. Used by all
+ * three render paths (parts-table thumbnail, nest preview, SVG export)
+ * so the reflection stays consistent — the round-2 mirror bug came from
+ * one render path diverging, so this is deliberately a single helper.
+ *
+ * Reflection about a line at angle θ through (x0, y0) uses the matrix
+ * [[cos2θ, sin2θ], [sin2θ, -cos2θ]] applied to (p − origin), then
+ * translated back — expressed as an SVG `matrix(a b c d e f)`.
+ */
+export function foldReflectionTransform(foldLine: {
+  x0: number;
+  y0: number;
+  ang: number;
+}): string {
+  const { x0, y0, ang } = foldLine;
+  const a = Math.cos(2 * ang);
+  const b = Math.sin(2 * ang);
+  const c = Math.sin(2 * ang);
+  const d = -Math.cos(2 * ang);
+  const e = x0 - (a * x0 + c * y0);
+  const f = y0 - (b * x0 + d * y0);
+  return `matrix(${a} ${b} ${c} ${d} ${e} ${f})`;
 }

@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg"
+     xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
+     width="1040" height="200" viewBox="0 0 1040 200">
+  <!-- Phase R8-C fixture: five "house" pieces
+       whose apex is the TOP of the piece, each with a grain line, laid out
+       the way PDF patterns often are: A upright, B upside down, C tilted
+       60 degrees, D lying on its side with the apex to the left, and E on
+       its other side (apex right) with its grain line drawn the other way. -->
+  <g id="piece-A" inkscape:label="A Upright">
+    <polygon points="90.0,80.0 120.0,20.0 150.0,80.0 150.0,160.0 90.0,160.0" fill="none" stroke="#000"/>
+    <line id="grain-A" x1="120.0" y1="60.0" x2="120.0" y2="150.0" stroke="#888"/>
+  </g>
+  <g id="piece-B" inkscape:label="B Upside down">
+    <polygon points="350.0,120.0 320.0,180.0 290.0,120.0 290.0,40.0 350.0,40.0" fill="none" stroke="#000"/>
+    <line id="grain-B" x1="320.0" y1="140.0" x2="320.0" y2="50.0" stroke="#888"/>
+  </g>
+  <g id="piece-C" inkscape:label="C Tilted">
+    <polygon points="487.679,115.981 450.718,60.0 517.679,64.019 586.962,104.019 556.962,155.981" fill="none" stroke="#000"/>
+    <line id="grain-C" x1="485.359" y1="80.0" x2="563.301" y2="125.0" stroke="#888"/>
+  </g>
+  <g id="piece-D" inkscape:label="D Sideways">
+    <polygon points="700.0,130.0 640.0,100.0 700.0,70.0 780.0,70.0 780.0,130.0" fill="none" stroke="#000"/>
+    <line id="grain-D" x1="680.0" y1="100.0" x2="770.0" y2="100.0" stroke="#888"/>
+  </g>
+  <g id="piece-E" inkscape:label="E Sideways reversed grain">
+    <polygon points="940.0,70.0 1000.0,100.0 940.0,130.0 860.0,130.0 860.0,70.0" fill="none" stroke="#000"/>
+    <line id="grain-E" x1="870.0" y1="100.0" x2="960.0" y2="100.0" stroke="#888"/>
+  </g>
+</svg>

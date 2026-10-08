@@ -644,6 +644,21 @@ function childPathsToClipperCoordinates(polygon, config) {
   return clipperChildren;
 }
 
+// §9.0.1 R6-C: sliver tolerance for the material-overlap validators.
+// NFP candidate positions are TOUCHING positions; for curvy outlines and
+// non-axis rotations (irrational sin/cos), the integer scaling round-trips
+// leave microscopic sliver intersections along the shared boundary. The old
+// zero-tolerance test (`area > 0`) therefore vetoed EVERY candidate for
+// such parts — a large shrug piece (grain-locked at 224.8°) could never get a
+// second piece placed, succeeding only when rounding luck made a candidate
+// integer-exact (testing round 6: "mostly 0/2"). Axis-rotated rectangles have
+// exact trig, which is why simple test shapes never showed this.
+// Tolerance: a 10^-4 fraction of the smaller polygon's area — for a
+// 33×47 in shrug that allows ≈34 mm² of boundary sliver (a hair's width
+// along a long edge, far below fabric-cutting accuracy) while genuine
+// piece-into-piece overlaps remain thousands of times larger.
+var MATERIAL_OVERLAP_RELATIVE_TOLERANCE = 1e-4;
+
 function hasMaterialOverlap(A, B, config) {
   var clipperA = outerPathToClipperCoordinates(A, config);
   var clipperB = outerPathToClipperCoordinates(B, config);
@@ -673,13 +688,19 @@ function hasMaterialOverlap(A, B, config) {
     intersection = materialIntersection;
   }
 
+  // Overlap only counts when it exceeds the sliver tolerance relative to
+  // the smaller part (all areas in the same clipper-scaled units).
+  var tolArea =
+    MATERIAL_OVERLAP_RELATIVE_TOLERANCE *
+    Math.min(
+      Math.abs(ClipperLib.Clipper.Area(clipperA)),
+      Math.abs(ClipperLib.Clipper.Area(clipperB))
+    );
+  var totalIntersection = 0;
   for (let i = 0; i < intersection.length; i++) {
-    if (Math.abs(ClipperLib.Clipper.Area(intersection[i])) > 0) {
-      return true;
-    }
+    totalIntersection += Math.abs(ClipperLib.Clipper.Area(intersection[i]));
   }
-
-  return false;
+  return totalIntersection > tolArea;
 }
 
 function hasMaterialOutsideSheet(part, sheet, config) {
@@ -696,7 +717,16 @@ function hasMaterialOutsideSheet(part, sheet, config) {
     return true;
   }
 
-  if (hasNonZeroClipperArea(outside)) {
+  // §9.0.1 R6-C: same sliver tolerance as hasMaterialOverlap — a part
+  // placed flush against the sheet edge leaves rounding slivers "outside".
+  var tolArea =
+    MATERIAL_OVERLAP_RELATIVE_TOLERANCE *
+    Math.abs(ClipperLib.Clipper.Area(clipperPart));
+  var totalOutside = 0;
+  for (let i = 0; i < outside.length; i++) {
+    totalOutside += Math.abs(ClipperLib.Clipper.Area(outside[i]));
+  }
+  if (totalOutside > tolArea) {
     return true;
   }
 
@@ -1156,6 +1186,9 @@ function placeParts(sheets, parts, config, nestindex) {
     r.source = parts[i].source;
     r.id = parts[i].id;
     r.filename = parts[i].filename;
+    if (parts[i].allowedRotations) {
+      r.allowedRotations = parts[i].allowedRotations;
+    }
 
     rotated.push(r);
   }
@@ -1251,20 +1284,41 @@ function placeParts(sheets, parts, config, nestindex) {
       var sheetNfp = null;
       // try all possible rotations until it fits
       // (only do this for the first part of each sheet, to ensure that all parts that can be placed are, even if we have to to open a lot of sheets)
-      for (let j = 0; j < config.rotations; j++) {
+      var allowedSet = (part.allowedRotations && part.allowedRotations.length > 0)
+        ? part.allowedRotations
+        : null;
+      var tries = allowedSet ? allowedSet.length : config.rotations;
+      for (let j = 0; j < tries; j++) {
         sheetNfp = getInnerNfp(sheet, part, config);
 
         if (sheetNfp) {
           break;
         }
 
-        // Rotate by equal angle steps (360° / number of allowed rotations) to try all configured orientations
-        // This ensures even distribution of rotation attempts across the full circle
-        var r = rotatePolygon(part, 360 / config.rotations);
-        r.rotation = part.rotation + (360 / config.rotations);
+        // Pick the next rotation to try.
+        // - If the part declares allowedRotations, cycle through that set
+        //   (so we never produce an orientation outside the constraint).
+        // - Otherwise fall back to evenly-spaced steps (original behaviour).
+        var nextRotation;
+        if (allowedSet) {
+          var currentIdx = allowedSet.indexOf(part.rotation);
+          nextRotation = allowedSet[(currentIdx + 1) % allowedSet.length];
+        } else {
+          nextRotation = part.rotation + (360 / config.rotations);
+        }
+
+        // Rotate by the delta from the current orientation to the next target.
+        var delta = nextRotation - part.rotation;
+        if (delta < 0) delta += 360;
+
+        var r = rotatePolygon(part, delta);
+        r.rotation = nextRotation;
         r.source = part.source;
         r.id = part.id;
-        r.filename = part.filename
+        r.filename = part.filename;
+        if (part.allowedRotations) {
+          r.allowedRotations = part.allowedRotations;
+        }
 
         // rotation is not in-place
         part = r;
@@ -1782,7 +1836,16 @@ function placeParts(sheets, parts, config, nestindex) {
     // The normalized width component (0.0008) is tiny compared to minarea, but it
     // provides a tiebreaker when comparing solutions with similar minarea values.
     // ============================================================================
-    fitness += (minwidth / sheetarea) + minarea;
+    // §9.0.1 R6-C: minwidth/minarea are declared INSIDE the per-part loop,
+    // AFTER the first-part shortcut `continue` — so on a sheet where only
+    // the first part placed (1-part nests, or every later part failing),
+    // they are still `undefined` here and `fitness += undefined/x +
+    // undefined` poisoned the WHOLE individual's fitness to NaN. A blind
+    // GA can never converge — the reported "0/2 no matter how long it runs".
+    // Such a sheet now simply contributes no placement-quality term.
+    if (minarea !== null && minarea !== undefined) {
+      fitness += ((minwidth || 0) / sheetarea) + minarea;
+    }
 
     for (let i = 0; i < placed.length; i++) {
       totalplacedarea += polygonMaterialArea(placed[i]);

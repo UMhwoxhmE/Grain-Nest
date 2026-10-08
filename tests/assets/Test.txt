@@ -1,0 +1,16 @@
+Grain-Nest cut list
+Generated: 2026-05-19 16:03:16
+==========================================
+
+PIECES
+  synthetic-grain.svg           ×3
+
+SHEET 1 of 1  (5.4 in wide × 6.4 in long fabric)
+  Pieces placed:   3
+  Length used:     6.4 in  (of 6.4 in specified)
+  Utilisation:     1372%
+
+TOTAL FABRIC NEEDED
+  Sheet 1: 5.4 in wide × 6.4 in long = 0.24 ft²
+
+  Total length to buy: 6.4 in

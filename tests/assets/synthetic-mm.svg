@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg"
+     xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
+     width="300mm" height="120mm" viewBox="0 0 300 120">
+  <!-- v1.1.1 fixture: a file measured in millimetres (width="300mm" with a
+       mm viewBox), like Inkscape pattern exports. Three pieces of different
+       sizes so sorting by Size changes their order. Each has a grain line; Mid's lies on its left edge (a fold). -->
+  <g id="piece-big" inkscape:label="Big C2M">
+    <path d="M 10,10 L 110,10 L 110,110 L 10,110 Z" fill="none" stroke="#000"/>
+    <path id="grain-big" d="M 60,20 L 60,100" stroke="#888"/>
+  </g>
+  <g id="piece-mid" inkscape:label="Mid C1L">
+    <path d="M 130,10 L 190,10 L 190,90 L 130,90 Z" fill="none" stroke="#000"/>
+    <path id="grain-mid" d="M 130,15 L 130,85" stroke="#888"/>
+  </g>
+  <g id="piece-small" inkscape:label="Small C2I">
+    <path d="M 210,10 L 240,10 L 250,50 L 210,50 Z" fill="none" stroke="#000"/>
+    <path id="grain-small" d="M 225,15 L 225,45" stroke="#888"/>
+  </g>
+</svg>

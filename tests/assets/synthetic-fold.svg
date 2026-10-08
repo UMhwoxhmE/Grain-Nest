@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="300" height="240" viewBox="0 0 300 240">
+
+  <!-- Cut-on-fold smoke-test fixture.
+
+       An ASYMMETRIC half-piece whose straight LEFT edge (x=100) is the
+       fold edge. The grain line is a <line class="grainline"> drawn just
+       inside that edge, parallel to it (the pattern convention: the fold edge
+       is the grainline). Asymmetric on purpose so doubling is obvious.
+
+       Toggling "Cut on fold" should reflect the piece across the grain
+       line and union the two halves into one symmetric piece roughly
+       twice as wide (a butterfly). -->
+
+  <g id="half-piece">
+    <polygon points="100,20 180,40 200,110 150,200 100,200"
+             fill="none" stroke="#000"/>
+    <line class="grainline" x1="103" y1="50" x2="103" y2="170" stroke="#888"/>
+  </g>
+
+</svg>

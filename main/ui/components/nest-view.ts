@@ -21,6 +21,8 @@ import {
   setInnerHtml,
   createTranslate,
   createCssTransform,
+  foldReflectionTransform,
+  clearChildren,
 } from "../utils/dom-utils.js";
 import { millisecondsToStr } from "../utils/ui-helpers.js";
 
@@ -42,15 +44,12 @@ interface NestViewRactiveInstance {
   /** Set a value in the data context */
   set<K extends keyof NestViewData>(
     keypath: K,
-    value: NestViewData[K]
+    value: NestViewData[K],
   ): Promise<void>;
   /** Register an event handler with Ractive-specific event signature */
   on(
     eventName: string,
-    handler: (
-      event: RactiveEvent,
-      ...args: unknown[]
-    ) => boolean | void
+    handler: (event: RactiveEvent, ...args: unknown[]) => boolean | void,
   ): void;
 }
 
@@ -82,6 +81,19 @@ interface NestViewData {
   getPartsPlaced: () => string;
   getUtilisation: () => string;
   getTimeSaved: () => string;
+  /**
+   * §9.3.6: minimum fabric length needed across all sheets in the
+   * currently-selected nest, formatted in the user's current units.
+   * Returns "-" when no nest is selected.
+   */
+  getMinLength: () => string;
+  /**
+   * §9.0.1 R6-A: nests ranked by min fabric length, least first — the
+   * order the "best nests so far" list renders in.
+   */
+  getNestsByFabric: () => SelectableNestingResult[];
+  /** §9.0.1 R6-A: a nest's min fabric length, formatted for its row label. */
+  getNestLength: (n: SelectableNestingResult) => string;
 }
 
 /**
@@ -230,12 +242,15 @@ export class NestViewService {
       }
 
       // Reset class (make visible)
-      groupElement.setAttribute("class", `${CSS_CLASSES.SHEET} ${CSS_CLASSES.ACTIVE}`);
+      groupElement.setAttribute(
+        "class",
+        `${CSS_CLASSES.SHEET} ${CSS_CLASSES.ACTIVE}`,
+      );
 
       const sheetBounds: Bounds = this.deepNest.parts[s.sheet].bounds;
       groupElement.setAttribute(
         "transform",
-        createTranslate(-sheetBounds.x, svgHeight - sheetBounds.y)
+        createTranslate(-sheetBounds.x, svgHeight - sheetBounds.y),
       );
       if (svgWidth < sheetBounds.width) {
         svgWidth = sheetBounds.width;
@@ -248,18 +263,59 @@ export class NestViewService {
           const partGroup = createSvgElement("g");
           partGroup.setAttribute("id", `part${p.id}`);
 
-          part.svgelements.forEach((e, index) => {
-            const node = e.cloneNode(false) as SVGElement;
-            if (index === 0) {
-              node.setAttribute("fill", `url(#part${p.source}hatch)`);
-              node.setAttribute("fill-opacity", "0.5");
-            } else {
-              node.setAttribute("fill", "#404247");
-            }
-            node.removeAttribute("style");
-            node.setAttribute("stroke", "#ffffff");
-            partGroup.appendChild(node);
-          });
+          // §9.3.2: a mirrored piece is flipped at render time, not baked
+          // into its svgelements. The parts-table thumbnail (parts-view.ts)
+          // and the SVG export (export.service.ts) both wrap the elements
+          // in a `scale(-1, 1)` group about the bounds-centre vertical axis;
+          // the nest preview must do the same or the mirror is silently
+          // dropped here. Symptom: a mirror-copy whose grain was reflected
+          // (e.g. 45°→135°) gets the engine's compensating rotation but is
+          // drawn un-flipped, so the grain line lands along the weft
+          // instead of the warp (and a non-symmetric outline is drawn the
+          // wrong way round). The flip is appended *inside* partGroup so it
+          // composes in the piece's local frame — before the placement
+          // translate/rotate applied to partGroup below.
+          let elementTarget: SVGElement = partGroup;
+          if (part.mirror) {
+            const cx = part.bounds.x + part.bounds.width / 2;
+            const mirrorGroup = createSvgElement("g");
+            mirrorGroup.setAttribute(
+              "transform",
+              `translate(${2 * cx} 0) scale(-1 1)`,
+            );
+            partGroup.appendChild(mirrorGroup);
+            elementTarget = mirrorGroup;
+          }
+
+          const appendStyledElements = (parent: SVGElement): void => {
+            part.svgelements.forEach((e, index) => {
+              const node = e.cloneNode(false) as SVGElement;
+              if (index === 0) {
+                node.setAttribute("fill", `url(#part${p.source}hatch)`);
+                node.setAttribute("fill-opacity", "0.5");
+              } else {
+                node.setAttribute("fill", "#404247");
+              }
+              node.removeAttribute("style");
+              node.setAttribute("stroke", "#ffffff");
+              parent.appendChild(node);
+            });
+          };
+          appendStyledElements(elementTarget);
+          // §9.3.2 b3: a cut-on-fold piece draws a second, reflected copy
+          // so the placed piece shows doubled — matching the doubled
+          // polygon the worker actually nested. Inside elementTarget so it
+          // composes in the piece's local frame, before the placement
+          // transform applied to partGroup.
+          if (part.cutOnFold && part.foldLine) {
+            const foldGroup = createSvgElement("g");
+            foldGroup.setAttribute(
+              "transform",
+              foldReflectionTransform(part.foldLine),
+            );
+            elementTarget.appendChild(foldGroup);
+            appendStyledElements(foldGroup);
+          }
 
           svg.appendChild(partGroup);
 
@@ -270,7 +326,7 @@ export class NestViewService {
             pattern.setAttribute("patternUnits", "userSpaceOnUse");
 
             let psize = parseInt(
-              String(this.deepNest.parts[s.sheet].bounds.width / 120)
+              String(this.deepNest.parts[s.sheet].bounds.width / 120),
             );
             psize = psize || 10;
 
@@ -280,12 +336,12 @@ export class NestViewService {
             const path = createSvgElement("path");
             path.setAttribute(
               "d",
-              `M-1,1 l2,-2 M0,${psize} l${psize},-${psize} M${psize - 1},${psize + 1} l2,-2`
+              `M-1,1 l2,-2 M0,${psize} l${psize},-${psize} M${psize - 1},${psize + 1} l2,-2`,
             );
             const hue = 360 * (p.source / this.deepNest.parts.length);
             path.setAttribute(
               "style",
-              `stroke: hsl(${hue}, 100%, 80%) !important; stroke-width:1`
+              `stroke: hsl(${hue}, 100%, 80%) !important; stroke-width:1`,
             );
             pattern.appendChild(path);
 
@@ -302,7 +358,7 @@ export class NestViewService {
           // Reset class (make visible)
           partElement.setAttribute(
             "class",
-            `${CSS_CLASSES.PART} ${CSS_CLASSES.ACTIVE}`
+            `${CSS_CLASSES.PART} ${CSS_CLASSES.ACTIVE}`,
           );
 
           // Position part with CSS transform
@@ -311,8 +367,8 @@ export class NestViewService {
             `transform: ${createCssTransform(
               p.x - sheetBounds.x,
               p.y + svgHeight - sheetBounds.y,
-              p.rotation
-            )}`
+              p.rotation,
+            )}`,
           );
 
           // Add merge lines if present
@@ -359,6 +415,67 @@ export class NestViewService {
     const deepNest = this.deepNest;
     const config = this.config;
 
+    // §9.0.1 R6-A: minimum fabric length of ONE nest result, in SVG units —
+    // per sheet, the max warp-axis extent of its placements (exact
+    // rotation-aware DeepNest.placedBounds, measured from the sheet's own
+    // origin), summed across sheets. Shared by the selected-nest stat, the
+    // per-row labels, and the fabric-ranked ordering of "best nests so far"
+    // (the GA's fitness ranking is NOT a fabric ranking —
+    // its favourites can need 200 in while a 157 in layout sits mid-list, so
+    // order the list by what the user actually buys).
+    const minLengthSvg = (nest: SelectableNestingResult): number | null => {
+      if (!nest || !nest.placements) return null;
+      const warpDir =
+        (deepNest as unknown as { warpDirection?: "horizontal" | "vertical" })
+          .warpDirection ?? "horizontal";
+      const isWarpH = warpDir !== "vertical";
+      let totalSvg = 0;
+      for (const sg of nest.placements as unknown as Array<{
+        sheet: number;
+        sheetplacements: Array<{
+          source: number;
+          x: number;
+          y: number;
+          rotation: number;
+        }>;
+      }>) {
+        const sheetPart = deepNest.parts[sg.sheet];
+        const sheetOrigin = sheetPart
+          ? isWarpH
+            ? sheetPart.bounds.x
+            : sheetPart.bounds.y
+          : 0;
+        let maxExtent = 0;
+        for (const p of sg.sheetplacements) {
+          const part = deepNest.parts[p.source];
+          if (!part || part.sheet) continue;
+          const pb = deepNest.placedBounds(part, p);
+          if (!pb) continue;
+          const end = isWarpH
+            ? pb.x + pb.width - sheetOrigin
+            : pb.y + pb.height - sheetOrigin;
+          if (end > maxExtent) maxExtent = end;
+        }
+        totalSvg += maxExtent;
+      }
+      return totalSvg;
+    };
+
+    // Format an SVG-unit length in the user's units — same convention as
+    // the cut list (m for anything ≥1000 mm, otherwise mm; inches as in).
+    const formatLengthSvg = (totalSvg: number): string => {
+      const units = config.getSync("units");
+      const scale = (config.getSync("scale") as number) || 72;
+      const userUnits =
+        units === "mm" ? (totalSvg / scale) * 25.4 : totalSvg / scale;
+      if (units === "mm") {
+        if (Math.abs(userUnits) >= 1000)
+          return `${(userUnits / 1000).toFixed(2)} m`;
+        return `${userUnits.toFixed(0)} mm`;
+      }
+      return `${userUnits.toFixed(1)} in`;
+    };
+
     // Create main Ractive instance
     this.ractive = new Ractive({
       el: SELECTORS.NEST_CONTENT,
@@ -389,7 +506,7 @@ export class NestViewService {
         }): string {
           const ne = this.get("nests");
           const selected = ne.filter(
-            (n: SelectableNestingResult) => n.selected
+            (n: SelectableNestingResult) => n.selected,
           );
 
           if (selected.length === 0) {
@@ -406,7 +523,8 @@ export class NestViewService {
 
           let total = 0;
           for (let i = 0; i < deepNest.parts.length; i++) {
-            if (!deepNest.parts[i].sheet) {
+            // phase-r8a: excluded pieces aren't part of this nest.
+            if (!deepNest.parts[i].sheet && !deepNest.parts[i].excluded) {
               total += deepNest.parts[i].quantity;
             }
           }
@@ -426,7 +544,7 @@ export class NestViewService {
         }): string {
           const ne = this.get("nests");
           const selected = ne.filter(
-            (n: SelectableNestingResult) => n.selected
+            (n: SelectableNestingResult) => n.selected,
           );
 
           if (selected.length === 0) {
@@ -442,6 +560,42 @@ export class NestViewService {
           // Assume 2 inches per second cut speed
           const seconds = lengthInches / 2;
           return millisecondsToStr(seconds * 1000);
+        },
+        // §9.3.6: total min fabric length needed across all sheets in
+        // the currently-selected nest, formatted in current units.
+        // §9.0.1 R6-A: computed by the shared minLengthSvg (exact
+        // rotation-aware placedBounds) — the old `p.x + bounds.width`
+        // shortcut reported 171.5 in on a 160 in sheet that held everything
+        // (testing round 6).
+        getMinLength: function (this: {
+          get: (key: string) => () => SelectableNestingResult[];
+        }): string {
+          const getSelected = this.get("getSelected");
+          const selected = getSelected();
+          if (selected.length === 0) return "-";
+          const v = minLengthSvg(selected[0]);
+          return v === null ? "-" : formatLengthSvg(v);
+        },
+        // §9.0.1 R6-A: "best nests so far" ranked by fabric needed,
+        // least first — the GA's own fitness order is not a fabric order.
+        // Returns a sorted COPY; deepNest.nests itself is untouched, so
+        // selection, project save and the engine all see the real array.
+        getNestsByFabric: function (this: {
+          get: (key: string) => SelectableNestingResult[];
+        }): SelectableNestingResult[] {
+          const ne = this.get("nests");
+          return ne
+            .slice()
+            .sort(
+              (a, b) =>
+                (minLengthSvg(a) ?? Infinity) - (minLengthSvg(b) ?? Infinity),
+            );
+        },
+        // §9.0.1 R6-A: per-row fabric-length label so the ranking is
+        // visible on the list itself.
+        getNestLength: function (n: SelectableNestingResult): string {
+          const v = minLengthSvg(n);
+          return v === null ? "" : formatLengthSvg(v);
         },
       },
     });
@@ -474,7 +628,7 @@ export class NestViewService {
         // Update UI
         this.update();
         this.displayNest(n);
-      }
+      },
     );
   }
 
@@ -484,6 +638,27 @@ export class NestViewService {
   update(): void {
     if (this.ractive) {
       this.ractive.update("nests");
+    }
+  }
+
+  /**
+   * §9.3.6 / phase-5z: empty the nest preview and reset its stats. Used after
+   * Trim sheets clears DeepNest.nests. The preview is built *imperatively*
+   * into #nestsvg (cached per-sheet and per-part groups whose sheet `<rect>`
+   * was cloned at the OLD bounds), so a Ractive update alone never refreshes
+   * it — and worse, the cached sheet group would be reused at the stale size
+   * on the next nest. Removing the children forces displayNest to rebuild
+   * every group from the now-trimmed bounds. A full ractive.update() then
+   * re-reads the emptied nests array so utilisation / min-length /
+   * parts-placed fall back to "-".
+   */
+  clearDisplay(): void {
+    const svg = getElement<SVGSVGElement>(SELECTORS.NEST_SVG);
+    if (svg) {
+      clearChildren(svg);
+    }
+    if (this.ractive) {
+      this.ractive.update();
     }
   }
 
@@ -534,7 +709,9 @@ export class NestViewService {
  * @param options - Configuration options
  * @returns New NestViewService instance
  */
-export function createNestViewService(options: NestViewOptions): NestViewService {
+export function createNestViewService(
+  options: NestViewOptions,
+): NestViewService {
   return NestViewService.create(options);
 }
 
@@ -555,7 +732,7 @@ export function createNestViewService(options: NestViewOptions): NestViewService
  */
 export function initializeNestView(
   deepNest: DeepNestInstance,
-  config: ConfigObject
+  config: ConfigObject,
 ): NestViewService {
   const service = new NestViewService({ deepNest, config });
   service.initialize();

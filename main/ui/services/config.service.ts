@@ -23,7 +23,7 @@ interface IpcRenderer {
  */
 export const DEFAULT_CONFIG: Readonly<UIConfig> = {
   units: "inch" as UnitType,
-  scale: 72, // actual stored value will be in units/inch
+  scale: 96, // units/inch — 96 matches Inkscape / CSS px DPI (phase-5r, testing round 4). Was 72 (PostScript points).
   spacing: 0,
   curveTolerance: 0.72, // store distances in native units
   clipperScale: 10000000,
@@ -32,8 +32,11 @@ export const DEFAULT_CONFIG: Readonly<UIConfig> = {
   populationSize: 10,
   mutationRate: 10,
   placementType: "box" as PlacementType, // how to place each part (possible values gravity, box, convexhull)
-  mergeLines: true, // whether to merge lines
-  timeRatio: 0.5, // ratio of material reduction to laser time. 0 = optimize material only, 1 = optimize laser time only
+  // v1.3.0: the laser-cutting options are retired (settings review):
+  // no line merging, and nests are scored on fabric only. Forced on load by
+  // retireSettings(), whatever an older settings file says.
+  mergeLines: false,
+  timeRatio: 0,
   simplify: false,
   dxfImportScale: 1,
   dxfExportScale: 1,
@@ -41,9 +44,23 @@ export const DEFAULT_CONFIG: Readonly<UIConfig> = {
   conversionServer: DEFAULT_CONVERSION_SERVER,
   useSvgPreProcessor: false,
   useQuantityFromFileName: false,
-  exportWithSheetBoundboarders: false,
+  // v1.3.0: on by default — the border is what you line up the
+  // projector with.
+  exportWithSheetBoundboarders: true,
   exportWithSheetsSpace: false,
   exportWithSheetsSpaceValue: 0.3937007874015748, // 10mm in inches
+  // §9.3.8 (Phase 5j): calibration box on every SVG export so the
+  // user can verify print/projection scale at a glance.
+  exportScalingBox: true,
+  exportScalingBoxSizeInches: 4,
+  // §9.3.9 / phase-5r: default per-piece seam allowance (mm) applied to
+  // imported pieces, so sew lines appear by default (testing round 4).
+  defaultSeamAllowanceMm: 12,
+  // v1.3.0: knits default to 10 mm. Which one new pieces get is the
+  // project's Woven / Knit switch (DeepNest.fabricType).
+  defaultSeamAllowanceKnitMm: 10,
+  // v1.3.0: bumped when saved settings need a one-off migration.
+  settingsRevision: 1,
 };
 
 /**
@@ -56,6 +73,7 @@ export const BOOLEAN_CONFIG_KEYS: ReadonlyArray<keyof UIConfig> = [
   "useQuantityFromFileName",
   "exportWithSheetBoundboarders",
   "exportWithSheetsSpace",
+  "exportScalingBox",
 ];
 
 /**
@@ -96,6 +114,8 @@ export class ConfigService implements ConfigObject {
   exportWithSheetBoundboarders: boolean;
   exportWithSheetsSpace: boolean;
   exportWithSheetsSpaceValue: number;
+  exportScalingBox: boolean;
+  exportScalingBoxSizeInches: number;
   access_token?: string;
   id_token?: string;
 
@@ -127,9 +147,12 @@ export class ConfigService implements ConfigObject {
     this.conversionServer = this.config.conversionServer;
     this.useSvgPreProcessor = this.config.useSvgPreProcessor;
     this.useQuantityFromFileName = this.config.useQuantityFromFileName;
-    this.exportWithSheetBoundboarders = this.config.exportWithSheetBoundboarders;
+    this.exportWithSheetBoundboarders =
+      this.config.exportWithSheetBoundboarders;
     this.exportWithSheetsSpace = this.config.exportWithSheetsSpace;
     this.exportWithSheetsSpaceValue = this.config.exportWithSheetsSpaceValue;
+    this.exportScalingBox = this.config.exportScalingBox;
+    this.exportScalingBoxSizeInches = this.config.exportScalingBoxSizeInches;
   }
 
   /**
@@ -145,11 +168,12 @@ export class ConfigService implements ConfigObject {
     if (this.ipcRenderer) {
       try {
         const savedConfig = (await this.ipcRenderer.invoke(
-          IPC_CHANNELS.READ_CONFIG
+          IPC_CHANNELS.READ_CONFIG,
         )) as Partial<UIConfig> | null;
 
         if (savedConfig && typeof savedConfig === "object") {
           this.mergeConfig(savedConfig);
+          this.retireSettings(savedConfig);
         }
       } catch {
         // If reading fails, continue with defaults
@@ -158,6 +182,25 @@ export class ConfigService implements ConfigObject {
     }
 
     this.initialized = true;
+  }
+
+  /**
+   * v1.3.0 (settings review): settings removed from the Settings
+   * page keep their harmless value even if an older settings file says
+   * otherwise — no laser line-merging, fabric-only scoring, no rough
+   * shapes, no SVG normaliser (it strips Inkscape labels), no quantity
+   * from filenames. One-off migration: the sheet border defaults to on.
+   */
+  private retireSettings(saved: Partial<UIConfig>): void {
+    this.setConfigValue("mergeLines", false);
+    this.setConfigValue("timeRatio", 0);
+    this.setConfigValue("simplify", false);
+    this.setConfigValue("useSvgPreProcessor", false);
+    this.setConfigValue("useQuantityFromFileName", false);
+    if ((saved.settingsRevision ?? 0) < 1) {
+      this.setConfigValue("exportWithSheetBoundboarders", true);
+      this.setConfigValue("settingsRevision", 1);
+    }
   }
 
   /**
@@ -181,7 +224,10 @@ export class ConfigService implements ConfigObject {
    * @param key - The configuration key
    * @param value - The value to set
    */
-  private setConfigValue<K extends keyof UIConfig>(key: K, value: UIConfig[K]): void {
+  private setConfigValue<K extends keyof UIConfig>(
+    key: K,
+    value: UIConfig[K],
+  ): void {
     // Use Object.assign to bypass strict type checking for dynamic assignment
     Object.assign(this.config, { [key]: value });
     Object.assign(this, { [key]: value });
@@ -210,9 +256,12 @@ export class ConfigService implements ConfigObject {
     this.conversionServer = this.config.conversionServer;
     this.useSvgPreProcessor = this.config.useSvgPreProcessor;
     this.useQuantityFromFileName = this.config.useQuantityFromFileName;
-    this.exportWithSheetBoundboarders = this.config.exportWithSheetBoundboarders;
+    this.exportWithSheetBoundboarders =
+      this.config.exportWithSheetBoundboarders;
     this.exportWithSheetsSpace = this.config.exportWithSheetsSpace;
     this.exportWithSheetsSpaceValue = this.config.exportWithSheetsSpaceValue;
+    this.exportScalingBox = this.config.exportScalingBox;
+    this.exportScalingBoxSizeInches = this.config.exportScalingBoxSizeInches;
     this.access_token = this.config.access_token;
     this.id_token = this.config.id_token;
   }
@@ -223,11 +272,17 @@ export class ConfigService implements ConfigObject {
    * @param key - Optional key to retrieve specific value
    * @returns The value for the key, or entire config if no key provided
    */
-  getSync<K extends keyof UIConfig>(key?: K): K extends keyof UIConfig ? UIConfig[K] : UIConfig {
+  getSync<K extends keyof UIConfig>(
+    key?: K,
+  ): K extends keyof UIConfig ? UIConfig[K] : UIConfig {
     if (key === undefined) {
-      return { ...this.config } as K extends keyof UIConfig ? UIConfig[K] : UIConfig;
+      return { ...this.config } as K extends keyof UIConfig
+        ? UIConfig[K]
+        : UIConfig;
     }
-    return this.config[key] as K extends keyof UIConfig ? UIConfig[K] : UIConfig;
+    return this.config[key] as K extends keyof UIConfig
+      ? UIConfig[K]
+      : UIConfig;
   }
 
   /**
@@ -238,7 +293,7 @@ export class ConfigService implements ConfigObject {
    */
   setSync<K extends keyof UIConfig>(
     keyOrObject: K | Partial<UIConfig>,
-    value?: UIConfig[K]
+    value?: UIConfig[K],
   ): void {
     if (typeof keyOrObject === "object") {
       // Set multiple values from object
@@ -387,7 +442,7 @@ export class ConfigService implements ConfigObject {
  * @returns Promise resolving to initialized ConfigService
  */
 export async function createConfigService(
-  ipcRenderer: IpcRenderer
+  ipcRenderer: IpcRenderer,
 ): Promise<ConfigService> {
   return ConfigService.create(ipcRenderer);
 }

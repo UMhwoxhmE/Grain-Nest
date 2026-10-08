@@ -1,32 +1,25 @@
 {
-  "name": "deepnest",
-  "version": "1.5.6",
-  "description": "Deep nesting for Laser and CNC",
+  "name": "grain-nest",
+  "version": "1.3.1",
+  "description": "Pattern nesting for dressmaking — fork of deepnest-next adding grain-direction constraints",
   "private": true,
   "main": "main.js",
   "types": "index.d.ts",
   "license": "MIT",
-  "funding": [
-    {
-      "type": "patreon",
-      "url": "https://patreon.com/deepnest_next?utm_medium=clipboard_copy&utm_source=copyLink&utm_campaign=creatorshare_fan&utm_content=join_link"
-    }
-  ],
   "scripts": {
+    "prestart": "tsc",
     "start": "electron .",
     "printenv": "cross-replace node -e \"console.log(process.env)\"",
     "test": "playwright test",
-    "build": "tsc && electron-builder install-app-deps",
-    "clean": "rmdir /s /q build dist >nul 2>&1|echo . >nul",
-    "clean-all": "rmdir /s /q build dist node_modules bin >nul 2>&1|echo . >nul",
-    "dist": "cross-replace npx @electron/packager . deepnest-v$npm_package_version --overwrite --ignore='\\.github' --ignore='\\.vscode' --ignore='\\.husky' --ignore='deepnest-v[0-9]+\\.[0-9]+\\.[0-9]+-[a-z0-9_-]' --ignore='out' --ignore='renovate\\.json' --ignore='\\.readthedocs\\.yaml' --ignore='CHANGELOG\\.md' --ignore='examples' --ignore='\\.gitignore' --ignore='playwright-report' --ignore='test.log'",
-    "build-dist": "electron-builder build --win",
-    "build-dist-signed": "electron-builder build --win --publish never",
+    "build": "tsc",
+    "postinstall": "tsc",
+    "rebuild-native": "electron-builder install-app-deps",
+    "clean": "rm -rf build dist out",
+    "clean-all": "rm -rf build dist out node_modules bin",
+    "dist": "electron-packager . Grain-Nest --platform=darwin --arch=arm64 --icon=icon.icns --app-bundle-id=com.grainnest.app --out=out --overwrite --ignore='\\.github' --ignore='\\.vscode' --ignore='\\.husky' --ignore='\\.claude' --ignore='^/out' --ignore='^/docs' --ignore='^/tests' --ignore='^/helper_scripts' --ignore='^/examples' --ignore='^/playwright-report' --ignore='^/test-results' --ignore='renovate\\.json' --ignore='\\.readthedocs\\.yaml' --ignore='CHANGELOG\\.md' --ignore='\\.gitignore' --ignore='\\.gitattributes' --ignore='test\\.log' --ignore='\\.command$' --ignore='setup-mac\\.sh' --ignore='grainnest-brief\\.md' --ignore='\\.tsbuildinfo$' && codesign --force --deep --sign - out/Grain-Nest-darwin-arm64/Grain-Nest.app",
     "dist-all": "npm run clean-all && npm install && npm run build && npm run dist",
-    "dist-all-signed": "npm run clean-all && npm install && npm run build && npm run build-dist-signed",
     "prepare": "husky || true",
     "precommit": "lint-staged",
-    "postinstall": "electron-builder install-app-deps",
     "pw:codegen": "node helper_scripts/playwright_codegen.js"
   },
   "husky": {
@@ -41,12 +34,13 @@
       "git add"
     ]
   },
-  "repository": "https://github.com/deepnest-next/deepnest",
+  "repository": "https://github.com/UMhwoxhmE/Grain-Nest",
   "keywords": [
     "Electron",
     "Nesting",
-    "CNC",
-    "Laser"
+    "Dressmaking",
+    "Sewing",
+    "Pattern"
   ],
   "devDependencies": {
     "@electron/packager": "18.3.6",
@@ -79,16 +73,16 @@
     "index.d.ts",
     "node_modules",
     "package.json",
-    "icon.icns",
-    "icon.ico"
+    "icon.icns"
   ],
   "build": {
-    "appId": "net.deepnest.app",
-    "copyright": "2026 deepnest-next Community",
+    "appId": "com.grainnest.app",
+    "copyright": "2026 Grain-Nest contributors. Forked from deepnest-next.",
     "nodeGypRebuild": false,
     "files": [
       "**/*",
       "build/**/*.js",
+      "!**/grain-nest-v*",
       "!**/deepnest-v*",
       "!**/out",
       "!**/playwright-*",
@@ -112,32 +106,7 @@
     ],
     "directories": {
       "app": ".",
-      "output": "deepnest-v${version}-win32-${arch}"
-    },
-    "win": {
-      "target": [
-        "dir",
-        "zip"
-      ],
-      "icon": "icon.ico",
-      "artifactName": "${name}-v${version}-win32-${arch}.${ext}",
-      "signAndEditExecutable": true,
-      "forceCodeSigning": true,
-      "signExts": [
-        ".node",
-        ".exe",
-        ".dll",
-        ".sys",
-        ".msi",
-        ".appx",
-        ".appxbundle"
-      ],
-      "signtoolOptions": {
-        "sign": "./helper_scripts/sign_windows.js",
-        "signingHashAlgorithms": [
-          "sha256"
-        ]
-      }
+      "output": "out"
     },
     "mac": {
       "category": "public.app-category.utilities",

@@ -1,50 +1,68 @@
-<img src="https://github.com/user-attachments/assets/9c9b1e8c-0251-4888-95bd-e795fa523b58" alt="deepnest next" width="768">
+# Grain-Nest
 
-# **deepnest**
+Pattern nesting for dressmaking. Grain-Nest takes the pieces of a sewing
+pattern (as an SVG file) and lays them out on fabric as tightly as it can,
+keeping every piece on its grain line.
 
-A fast open source nesting tool for plotter, laser cutters and other CNC tools
+It's a Mac app (Apple Silicon), built on the open-source
+[deepnest-next](https://github.com/deepnest-next/deepnest) nesting engine.
 
-deepnest is a desktop application originally based on [SVGNest](https://github.com/Jack000/SVGnest) and [deepnest](https://github.com/Jack000/Deepnest)
+## What it does
 
-- New nesting engine with speed-critical code, written in C (outsourced to an external NodeJs module)
-- Merging of common lines for plotter and laser cuts
-- Support for DXF files (through conversion)
-- New path approximation function for highly complex parts
+- **Grain lines.** Finds each piece's grain line when you import (Seamly2D
+  `class="grainline"`, Inkscape layers or ids containing `grain`), or you
+  mark it by hand with two clicks. Each piece gets a grain rule: on grain,
+  grain or flipped, bias, free or a custom tolerance.
+- **Dressmaking pieces.** Cut on fold, mirrored pieces (in place or as a
+  copy), a top end for each piece, nap (one-way fabric), and seam
+  allowances with sew lines. Woven and knit projects have their own
+  default seam allowance.
+- **Fabrics and sheets.** Name each sheet and say which fabric it is for
+  (main, lining, interfacing, fused…). **Nest for** picks the pieces for
+  one fabric from the cut codes in their names (e.g. `C2M` = cut 2 main).
+- **Results.** A list of the best layouts so far, sorted by fabric used,
+  exported as SVG (with sheet borders and a calibration square, for
+  projector cutting) and as a cut list.
+- **Projects.** Save and reopen everything as a `.gnp` file.
 
+There's a full walkthrough in [docs/USAGE.md](docs/USAGE.md).
 
+## Install
 
-## Upcoming changes
-- more speed with code written in Rust outsourced as modules, the original code was written in JavaScript
-- some core libraries rewritten from scratch in Rust so we get even more speed and ensure memory safety
-- Save and load settings as presets
-- Load nesting projects via CSV or JSON
-- Native support of DXF file formats without online conversion
-- **Cloud nesting:** Use our cloud for fast nesting of your projects _more soon_ 
+Download `grain-nest-v<version>-macos-arm64.dmg` from the latest
+[release](https://github.com/UMhwoxhmE/Grain-Nest/releases/latest), open it
+and drag **Grain-Nest** onto **Applications**. The app isn't signed by
+Apple, so the first time macOS may refuse to open it: right-click the app
+→ **Open**, or **System Settings → Privacy & Security → Open Anyway**.
 
+When a new version comes out, Grain-Nest says so when it starts.
 
-## How to Build?
+## Build from source
 
-Reed the [Build Docs](BUILD.md)
+See [BUILD.md](BUILD.md). In short, with Node.js 20+:
 
+```sh
+npm install
+npm run build
+npm start
+```
 
-## License
+`npm run dist` on a Mac makes `Grain-Nest.app`; `npm test` runs the
+Playwright tests.
 
-The main license is the MIT.
+## Built on
 
-- [LICENSE](LICENSE)
+Grain-Nest is a fork of
+[deepnest-next](https://github.com/deepnest-next/deepnest), which grew out
+of Jack Qiao's [SVGnest](https://github.com/Jack000/SVGnest) and
+[Deepnest](https://github.com/Jack000/Deepnest) (via the Dogthemachine and
+cmidgley forks). The nesting engine — the no-fit-polygon solver, the
+genetic algorithm and the SVG import — comes from those projects;
+Grain-Nest adds the grain and dressmaking features above.
 
-Further Licenses:
+## Licence
 
-- [LICENSES](LICENSES.md)
-
-## Fork History
-
-- https://github.com/Jack000/SVGnest (Academic Work References)
-- https://github.com/Jack000/Deepnest
-  - https://github.com/Dogthemachine/Deepnest
-    - https://github.com/cmidgley/Deepnest
-      - https://github.com/deepnest-io/Deepnest 
-      
-        (Not available anymore. ⚠️ don't should be trusted anymore: [readme](https://github.com/deepnest-next/.github/blob/main/profile/why-we-forked-into-a-new-organisation.md))
-        - https://github.com/deepnest-next/deepnest
-
+Open source, with the licences of the projects it's built on: mostly MIT,
+with one module under the GNU GPL v3 and the geometry libraries under the
+Boost Software License. See [LICENSE](LICENSE) and
+[LICENSES.md](LICENSES.md).

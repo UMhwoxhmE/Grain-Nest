@@ -17,8 +17,8 @@ var config = {
   mutationRate: 10,
   threads: 4,
   placementType: "gravity",
-  mergeLines: true,
-  timeRatio: 0.5,
+  mergeLines: false, // v1.3.0: laser options retired (see ConfigService)
+  timeRatio: 0, // v1.3.0: nests are scored on fabric only
   scale: 72,
   simplify: false,
   overlapTolerance: 0.0001,
@@ -49,6 +49,35 @@ export class DeepNest {
     // a running list of placements
     this.nests = [];
 
+    // §9.3.4: Directional-print / nap toggle. When true, the rotation
+    // set returned by grainRuleToRotations is reduced to one direction
+    // per piece (no 0°/180° flipping, bias to a single diagonal) so a
+    // napped fabric (velvet, corduroy, directional print) doesn't end
+    // up with pieces oriented inconsistently down the bolt. Ephemeral
+    // per session; saved with the project file.
+    this.nap = false;
+
+    // v1.3.0: woven or knit project — picks the default seam
+    // allowance new pieces get (Settings: wovens 12 mm, knits 10 mm).
+    // Saved with the project file.
+    this.fabricType = "woven";
+
+    // §9.3.10: warp direction. "horizontal" means the fabric's warp
+    // threads run along the horizontal axis of the bin — grain-locked
+    // pieces rotate so their grain ends at 0°. "vertical" rotates them
+    // to 90° instead. Also determines which bin axis is the "length
+    // being bought" for cut-list (§9.3.7) and the preset/auto-fit
+    // features (§9.3.5, §9.3.6). Default "horizontal" per brief §3.3.
+    //
+    // Round 2: the UI picker was removed (patterns are always cut
+    // warp-horizontal and the Vertical option was confusing), so this
+    // stays "horizontal" for the whole session — project load pins it
+    // too, ignoring any "vertical" saved by an older build. The
+    // "vertical" branch below and in grainRuleToRotations is left in
+    // place — dormant but correct — so reinstating the control is a
+    // UI-only change (restore the <select> + the two helper fns).
+    this.warpDirection = "horizontal";
+
     this.eventEmitter = eventEmitter;
   }
 
@@ -65,15 +94,24 @@ export class DeepNest {
     var svg = window.SvgParser.load(dirpath, svgstring, config.scale, scalingFactor);
     svg = window.SvgParser.cleanInput(dxfFlag);
 
+    var imp = null;
     if (filename) {
-      this.imports.push({
+      imp = {
         filename: filename,
         svg: svg,
-      });
+      };
+      this.imports.push(imp);
     }
 
     var parts = this.getParts(svg.children, filename);
     for (var i = 0; i < parts.length; i++) {
+      // v1.1.1: the part's fixed position among this import's parts, so a
+      // saved project can find it again however the list was sorted or
+      // pruned since (see ProjectService save/load).
+      if (filename) parts[i].importPartIndex = i;
+      // v1.3.0: and which import it came from — the same file imported
+      // twice has two imports with one filename. Not saved (an object).
+      if (imp) parts[i].importRef = imp;
       this.parts.push(parts[i]);
     }
 
@@ -793,6 +831,12 @@ export class DeepNest {
     // construct part objects with metadata
     var parts = [];
     var svgelements = Array.prototype.slice.call(paths);
+    // §9.0.1 #1 / phase-5s: identity of the source <path> a polygon came from,
+    // used to tell a piece's own interior subpaths from a genuine separate hole.
+    function elementKey(el) {
+      if (!el || !el.getAttribute) return null;
+      return el.getAttribute("id") || el.getAttribute("inkscape:label") || null;
+    }
     var openelements = svgelements.slice(); // elements that are not a part of the poly tree but may still be a part of the part (images, lines, possibly text..)
 
     for (var i = 0; i < polygons.length; i++) {
@@ -805,9 +849,39 @@ export class DeepNest {
       part.area = bounds.width * bounds.height;
       part.quantity = 1;
       part.filename = filename;
+      part.grainRule = "free";
+
+      // §9.3.12: best-effort piece name from the source SVG, so the cut
+      // list can itemise pieces (front, back, …) instead of merging them
+      // under one filename. extractPartName reads inkscape:label / a
+      // <title> child / a meaningful id off the root element or an
+      // ancestor group — the same attribute classes the grain detector
+      // already relies on surviving import. Undefined when nothing usable
+      // is found; the user types a name in the parts table instead.
+      // §9.3.12 / phase-5r: prefer the pre-flatten data-grainnest-name tag
+      // (inkscape:label/group context only survives flatten as this data
+      // attribute); fall back to extractPartName for untagged / programmatic
+      // elements.
+      var srcEl = svgelements[part.polygontree.source];
+      var detectedName =
+        (srcEl && srcEl.getAttribute && srcEl.getAttribute("data-grainnest-name")) ||
+        extractPartName(srcEl);
+      if (detectedName) {
+        part.name = detectedName;
+      }
 
       if (part.filename === "BACKGROUND.svg") {
         part.sheet = true;
+      }
+
+      // §9.3.9 / phase-5r: default seam allowance (mm) on imported pieces so
+      // sew lines appear without per-piece setup (testing round 4 — "make 12mm
+      // the default"). Sheets get none; per-piece edit/clear still wins, and
+      // a saved .gnp value overrides this on load.
+      if (!part.sheet) {
+        // v1.3.0: the woven or knit default, per the project's fabric type.
+        var defSeamMm = this.defaultSeamMm(this.fabricType);
+        if (defSeamMm > 0) part.seamAllowance = defSeamMm;
       }
 
       if (
@@ -844,6 +918,36 @@ export class DeepNest {
             openelements.splice(index, 1);
           }
         }
+      }
+
+      // §9.0.1 / phase-5u (supersedes the 5s id-based filter): dressmaking
+      // pieces are SOLID — interior marks (drill dots, notches, grain/welt
+      // annotations) are not cut-outs to nest other pieces into. flatten splits
+      // them into separate paths, sometimes sharing the piece's id (caught by
+      // 5s), sometimes not (Test Pattern 2's <g>-grouped marks have different
+      // ids and slipped through). The robust rule: a non-sheet part nests as its
+      // outer boundary. Drop ALL holes from the NESTING polygon; the marks stay
+      // in part.svgelements, so they still render and export on the cut piece.
+      // A genuine cut-out is still drawn/cut from svgelements — we just never
+      // pack another piece into it, which is the correct, safe choice for fabric.
+      if (
+        !part.sheet &&
+        part.polygontree.children &&
+        part.polygontree.children.length
+      ) {
+        if (grainnestDebugEnabled()) {
+          var _dropped = part.polygontree.children.map(function (c) {
+            var b = GeometryUtil.getPolygonBounds(c);
+            return b ? Math.round(b.width) + "x" + Math.round(b.height) : "?";
+          });
+          console.log(
+            "[grainnest] solid-piece: dropped " + _dropped.length +
+              " hole(s) from " +
+              (elementKey(svgelements[part.polygontree.source]) || "part") +
+              " [" + _dropped.join(", ") + "]",
+          );
+        }
+        part.polygontree.children = [];
       }
 
       parts.push(part);
@@ -886,6 +990,7 @@ export class DeepNest {
             this.pointInPolygon(mid, part.polygontree) === true
           ) {
             part.svgelements.push(el);
+            recordGrainIfTagged(part, el);
             openelements.splice(j, 1);
             j--;
           }
@@ -910,11 +1015,16 @@ export class DeepNest {
             openelements.splice(j, 1);
             j--;
           }
-        } else if (el.tagName == "path" || el.tagName == "polyline") {
+        } else if (
+          el.tagName == "path" ||
+          el.tagName == "polyline" ||
+          el.tagName == "polygon"
+        ) {
           var k;
           if (el.tagName == "path") {
             var p = window.SvgParser.polygonifyPath(el);
           } else {
+            // polyline + polygon both expose SVGPointList via el.points
             var p = [];
             for (k = 0; k < el.points.length; k++) {
               p.push({
@@ -954,6 +1064,7 @@ export class DeepNest {
           }
           if (found) {
             part.svgelements.push(el);
+            recordGrainIfTagged(part, el);
             openelements.splice(j, 1);
             j--;
           }
@@ -964,6 +1075,216 @@ export class DeepNest {
       }
     }
 
+    // §phase-5r: a grain/fold line drawn ON a piece's outline edge (e.g. the
+    // fold edge of a cut-on-fold half-piece) lies on the polygon boundary, so
+    // every pointInPolygon test above is false and it's left unattached —
+    // leaving the piece "Free" and breaking Cut-on-fold even though the grain
+    // was correctly detected. Rescue any still-unattached *tagged* grain/fold
+    // element by attaching it to the part whose bounding box contains its
+    // midpoint (bbox includes the boundary, unlike pointInPolygon). At import
+    // the pieces are at their original, non-overlapping positions, so the bbox
+    // hit is unambiguous. (testing round 4: real grains sit on the fold edge.)
+    var grainMidpoint = function (el) {
+      if (!el || !el.tagName) return null;
+      if (el.tagName === "line") {
+        var lx1 = Number(el.getAttribute("x1")),
+          ly1 = Number(el.getAttribute("y1")),
+          lx2 = Number(el.getAttribute("x2")),
+          ly2 = Number(el.getAttribute("y2"));
+        return isFinite(lx1) && isFinite(ly1) && isFinite(lx2) && isFinite(ly2)
+          ? { x: (lx1 + lx2) / 2, y: (ly1 + ly2) / 2 }
+          : null;
+      }
+      if (el.tagName === "path") {
+        var ep = window.SvgParser.pathEndpoints(el.getAttribute("d") || "");
+        return ep ? { x: (ep.x1 + ep.x2) / 2, y: (ep.y1 + ep.y2) / 2 } : null;
+      }
+      if (
+        (el.tagName === "polyline" || el.tagName === "polygon") &&
+        el.points &&
+        el.points.length
+      ) {
+        var a = el.points[0],
+          b = el.points[el.points.length - 1];
+        return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+      }
+      return null;
+    };
+    if (grainnestDebugEnabled()) {
+      console.log(
+        "[grainnest] part bounds:",
+        parts.map(function (p, ix) {
+          return {
+            ix: ix,
+            sheet: !!p.sheet,
+            b: p.bounds
+              ? [
+                  Math.round(p.bounds.x),
+                  Math.round(p.bounds.y),
+                  Math.round(p.bounds.width),
+                  Math.round(p.bounds.height),
+                ]
+              : null,
+          };
+        }),
+      );
+    }
+    for (var gi = 0; gi < openelements.length; gi++) {
+      var gel = openelements[gi];
+      if (
+        !gel.getAttribute ||
+        (gel.getAttribute("data-grainnest-grain") !== "1" &&
+          gel.getAttribute("data-grainnest-fold") !== "1")
+      ) {
+        continue;
+      }
+      var matchedPart = -1;
+      // Primary: shared SVG piece-group with a part's source element — the
+      // grain and its outline are siblings in the same <g>. Geometry-
+      // independent, so it works even when the grain's baked position lands
+      // off the piece (the Inkscape transform quirk — testing round 4).
+      var grp = gel.getAttribute("data-grainnest-group");
+      if (grp) {
+        for (var gp = 0; gp < parts.length; gp++) {
+          if (parts[gp].sheet) continue;
+          var srcEl = svgelements[parts[gp].polygontree.source];
+          if (
+            srcEl &&
+            srcEl.getAttribute &&
+            srcEl.getAttribute("data-grainnest-group") === grp
+          ) {
+            matchedPart = gp;
+            break;
+          }
+        }
+      }
+      // Fallback: the part whose bounding box contains the grain's midpoint.
+      var gmp = grainMidpoint(gel);
+      if (matchedPart === -1 && gmp) {
+        for (var gp2 = 0; gp2 < parts.length; gp2++) {
+          var gb = parts[gp2].bounds;
+          if (
+            gb &&
+            !parts[gp2].sheet &&
+            gmp.x >= gb.x &&
+            gmp.x <= gb.x + gb.width &&
+            gmp.y >= gb.y &&
+            gmp.y <= gb.y + gb.height
+          ) {
+            matchedPart = gp2;
+            break;
+          }
+        }
+      }
+      if (matchedPart !== -1) {
+        parts[matchedPart].svgelements.push(gel);
+        recordGrainIfTagged(parts[matchedPart], gel);
+        openelements.splice(gi, 1);
+        gi--;
+      }
+      if (grainnestDebugEnabled()) {
+        console.log(
+          "[grainnest] grain-rescue id=" +
+            (gel.getAttribute("id") || "") +
+            " group=" +
+            (grp || "") +
+            " mid=" +
+            (gmp ? Math.round(gmp.x) + "," + Math.round(gmp.y) : "null") +
+            " matchedPart=" +
+            matchedPart,
+        );
+      }
+    }
+
+    if (grainnestDebugEnabled()) {
+      console.log(
+        "[grainnest] getParts done for " + filename + ":",
+        parts.map(function (p, idx) {
+          return {
+            idx: idx,
+            filename: p.filename,
+            sheet: !!p.sheet,
+            grainRule: p.grainRule,
+            grainSource: p.grainSource,
+            grainAngle: p.grainAngle,
+            elementTags: (p.svgelements || []).map(function (e) {
+              return (
+                e.tagName +
+                (e.getAttribute && e.getAttribute("data-grainnest-grain") === "1"
+                  ? "[grain]"
+                  : "")
+              );
+            }),
+          };
+        })
+      );
+      console.log(
+        "[grainnest] openelements left unattached:",
+        openelements.map(function (e) {
+          return (
+            e.tagName +
+            (e.getAttribute && e.getAttribute("data-grainnest-grain") === "1"
+              ? "[grain]"
+              : "")
+          );
+        })
+      );
+
+      try {
+        var dbgFs = require("fs");
+        var dbgPath = require("path").join(
+          require("os").tmpdir(),
+          "grainnest-parts-debug.json"
+        );
+        dbgFs.writeFileSync(
+          dbgPath,
+          JSON.stringify(
+            {
+              filename: filename,
+              partCount: parts.length,
+              parts: parts.map(function (p, idx) {
+                var tree = p.polygontree || [];
+                function elDesc(srcIdx) {
+                  var e = svgelements[srcIdx];
+                  if (!e || !e.getAttribute) return { src: srcIdx };
+                  return {
+                    src: srcIdx,
+                    tag: e.tagName,
+                    id: e.getAttribute("id"),
+                    label: e.getAttribute("inkscape:label"),
+                  };
+                }
+                return {
+                  idx: idx,
+                  el: elDesc(tree.source),
+                  w: p.bounds ? Math.round(p.bounds.width) : null,
+                  h: p.bounds ? Math.round(p.bounds.height) : null,
+                  points: tree.length,
+                  holes: tree.children
+                    ? tree.children.map(function (c) {
+                        var b = GeometryUtil.getPolygonBounds(c);
+                        return {
+                          el: elDesc(c.source),
+                          w: b ? Math.round(b.width) : null,
+                          h: b ? Math.round(b.height) : null,
+                          points: c.length,
+                        };
+                      })
+                    : [],
+                  grainRule: p.grainRule,
+                };
+              }),
+            },
+            null,
+            2
+          )
+        );
+        console.log("[grainnest] wrote parts debug to " + dbgPath);
+      } catch (e) {
+        console.log("[grainnest] parts debug write failed: " + e.message);
+      }
+    }
+
     for (j = 0; j < openelements.length; j++) {
       var el = openelements[j];
       if (
@@ -971,7 +1292,22 @@ export class DeepNest {
         el.tagName == "polyline" ||
         el.tagName == "path"
       ) {
+        // Don't flag unmatched grain lines as errors — they are valid
+        // metadata that just couldn't be associated with a piece (e.g.
+        // grain drawn outside the cut boundary). Leave them alone.
+        if (el.getAttribute && el.getAttribute("data-grainnest-grain") === "1") {
+          continue;
+        }
         el.setAttribute("class", "error");
+      }
+    }
+
+    // For any non-sheet part without a detected grain, mark it as
+    // "manual-required" so Phase 4 knows to surface it for user
+    // marking. Pieces with a detected grain were already updated above.
+    for (var i = 0; i < parts.length; i++) {
+      if (!parts[i].sheet && !parts[i].grainSource) {
+        parts[i].grainSource = "manual-required";
       }
     }
 
@@ -995,6 +1331,385 @@ export class DeepNest {
     return newtree;
   };
 
+  // §9.3.6 dynamic fabric length — lightweight "trim to min" path.
+  //
+  // For each sheet part referenced by the currently-selected nest,
+  // shrink its length-axis dimension down to the actual maximum
+  // extent of placed pieces on that sheet. Length axis is picked
+  // from this.warpDirection: horizontal → x extent, vertical → y
+  // extent. Bolt-width axis is left alone.
+  //
+  // Mutation is in place so part indices in deepNest.parts stay
+  // stable. Nest results are cleared after the trim — they were
+  // computed against the old larger sheets and any visualisation
+  // depends on the sheet bounds matching. The user re-runs Start
+  // nest to verify the fit still holds at the trimmed size.
+  //
+  // Returns the number of sheets that were trimmed; 0 if no nest
+  // is currently selected, or if the selected nest's placements
+  // are already at minimum.
+  trimSheetsToMinLength() {
+    if (!this.nests || this.nests.length === 0) return 0;
+    var selected = null;
+    for (var i = 0; i < this.nests.length; i++) {
+      if (this.nests[i].selected) {
+        selected = this.nests[i];
+        break;
+      }
+    }
+    if (!selected) selected = this.nests[0];
+    if (!selected || !selected.placements) return 0;
+
+    var isWarpH = this.warpDirection !== "vertical";
+    var self = this;
+    var trimmedCount = 0;
+
+    selected.placements.forEach(function (sg) {
+      var sheetPart = self.parts[sg.sheet];
+      if (!sheetPart || !sheetPart.sheet) return;
+
+      // Find the maximum length-axis extent of non-sheet placements
+      // on this sheet. §9.0.1 R6-A: measured from the part's EXACT placed
+      // bounds (rotation-aware, via placedBounds) relative to the sheet's
+      // own origin — the old `p.x + bounds.width` shortcut overestimated,
+      // which made Trim *grow* sheets past the size that already fit.
+      var maxExtent = 0;
+      for (var j = 0; j < sg.sheetplacements.length; j++) {
+        var p = sg.sheetplacements[j];
+        var part = self.parts[p.source];
+        if (!part || part.sheet) continue;
+        var pb = self.placedBounds(part, p);
+        if (!pb) continue;
+        var end = isWarpH
+          ? pb.x + pb.width - sheetPart.bounds.x
+          : pb.y + pb.height - sheetPart.bounds.y;
+        if (end > maxExtent) maxExtent = end;
+      }
+      if (maxExtent <= 0) return;
+
+      var bx = sheetPart.bounds.x;
+      var by = sheetPart.bounds.y;
+      var newW = isWarpH ? maxExtent : sheetPart.bounds.width;
+      var newH = isWarpH ? sheetPart.bounds.height : maxExtent;
+
+      // Skip if no change (within a tiny epsilon).
+      if (
+        Math.abs(newW - sheetPart.bounds.width) < 0.01 &&
+        Math.abs(newH - sheetPart.bounds.height) < 0.01
+      ) {
+        return;
+      }
+
+      sheetPart.bounds.width = newW;
+      sheetPart.bounds.height = newH;
+      sheetPart.area = newW * newH;
+
+      // Rebuild the 4-corner polygontree.
+      sheetPart.polygontree.length = 0;
+      sheetPart.polygontree.push({ x: bx, y: by });
+      sheetPart.polygontree.push({ x: bx + newW, y: by });
+      sheetPart.polygontree.push({ x: bx + newW, y: by + newH });
+      sheetPart.polygontree.push({ x: bx, y: by + newH });
+
+      // Update the underlying <rect> element so the visual matches.
+      // svgelements[0] is the rect created in sheet-dialog.createSheetSvg.
+      var rect = sheetPart.svgelements && sheetPart.svgelements[0];
+      if (rect && rect.tagName === "rect") {
+        rect.setAttribute("width", String(newW));
+        rect.setAttribute("height", String(newH));
+      }
+
+      trimmedCount++;
+    });
+
+    if (trimmedCount > 0) {
+      // Nest results reference part indices and sheet sizes; after
+      // trim they're advisory. Clear so the UI doesn't show stale
+      // placements as if they were validated against the new sizes.
+      this.nests.length = 0;
+    }
+    return trimmedCount;
+  };
+
+  // §9.3.2 mirror toggle — behaviour 1 (Mirror, replace).
+  //
+  // Toggles the mirror flag on the part at `partIndex`, mirrors its
+  // polygontree and grain angle about the bounding-box vertical centre
+  // line, and notifies Ractive. svgelements are left untouched — the
+  // visual flip is composed at render/export time via a `scale(-1, 1)`
+  // transform that picks up off `part.mirror`.
+  //
+  // Toggling a second time un-mirrors (the polygontree is mirrored
+  // about the same axis a second time, which undoes the first
+  // operation; the flag flips back to false).
+  mirrorPart(partIndex) {
+    var part = this.parts[partIndex];
+    if (!part || part.sheet) return;
+    var axisX = part.bounds.x + part.bounds.width / 2;
+    mirrorPolygontreeX(part.polygontree, axisX);
+    if (typeof part.grainAngle === "number") {
+      var a = ((180 - part.grainAngle) % 360 + 360) % 360;
+      // phase-r8c: the top end of the grain line mirrors with the piece.
+      // For every angle but 0 the folded angle already keeps the top at
+      // its "+180°" end; a horizontal grain (0 -> 180 -> folded 0) swaps
+      // which end that is, so swap topFlip to keep the same physical top.
+      if (a >= 180) {
+        a -= 180;
+        part.topFlip = !part.topFlip;
+      }
+      part.grainAngle = a;
+    }
+    part.mirror = !part.mirror;
+  };
+
+  // v1.3.0: default seam allowance (mm) for a woven or knit project, from
+  // Settings (wovens 12 mm, knits 10 mm by default).
+  defaultSeamMm(fabricType) {
+    var key =
+      fabricType === "knit" ? "defaultSeamAllowanceKnitMm" : "defaultSeamAllowanceMm";
+    var mm = Number(window.config.getSync(key));
+    if (!isFinite(mm)) mm = fabricType === "knit" ? 10 : 12;
+    return mm;
+  };
+
+  // v1.3.0: switch the project between woven and knit. Pieces still on the
+  // old default seam allowance move to the new default; pieces whose seam
+  // was set by hand are left alone. Returns how many pieces changed.
+  setFabricType(fabricType) {
+    var next = fabricType === "knit" ? "knit" : "woven";
+    var oldMm = this.defaultSeamMm(this.fabricType);
+    var newMm = this.defaultSeamMm(next);
+    this.fabricType = next;
+    var changed = 0;
+    for (var i = 0; i < this.parts.length; i++) {
+      var p = this.parts[i];
+      if (p.sheet || p.seamAllowance !== oldMm || oldMm === newMm) continue;
+      p.seamAllowance = newMm;
+      changed++;
+    }
+    return changed;
+  };
+
+  // Phase R8-C: turn a piece end-to-end in the nest. grainAngle is folded
+  // to [0, 180) and can't say which end of the grain line is the top, so
+  // topFlip picks the other end.
+  flipPartTop(partIndex) {
+    var part = this.parts[partIndex];
+    if (!part || part.sheet || typeof part.grainAngle !== "number") {
+      return false;
+    }
+    part.topFlip = !part.topFlip;
+    return true;
+  };
+
+  // §9.3.2 mirror toggle — behaviour 2 (Mirror, keep both).
+  //
+  // Creates a new part that is a mirrored copy of the part at
+  // `partIndex`. Polygontree is deep-cloned and mirrored; svgelements
+  // are cloneNode(true)-d so the new part owns its own DOM nodes
+  // (otherwise the same element can't appear in two thumbnails). The
+  // copy's quantity defaults to 1 — the user adjusts after. Pushes
+  // the new part onto this.parts and returns its new index.
+  mirrorCopyPart(partIndex) {
+    var src = this.parts[partIndex];
+    if (!src || src.sheet) return -1;
+    // §9.0.1 R6-B: give the source a stable per-session id and link the
+    // copy to it, so saving can record EXACTLY which part a copy mirrors.
+    // The save-side filename-recency guess this replaces collapsed every
+    // bulk-made copy onto the last original (testing round 6: all 11 copies
+    // in a real .gnp saved as copies of part 14). Plain numbers — safe to
+    // clone/serialise, never persisted in the .gnp themselves.
+    if (!src.grainnestId) {
+      this._partIdSeq = (this._partIdSeq || 0) + 1;
+      src.grainnestId = this._partIdSeq;
+    }
+    var copy = {
+      polygontree: this.cloneTree(src.polygontree),
+      svgelements: src.svgelements.map(function (e) {
+        return e.cloneNode(true);
+      }),
+      filename: src.filename,
+      name: src.name,
+      quantity: 1,
+      grainRule: src.grainRule,
+      grainAngle: src.grainAngle,
+      grainSource: src.grainSource,
+      // phase-r8c: same top as the source (mirrorPart below keeps it).
+      topFlip: src.topFlip,
+      // §9.0.1 R6-D (testing round 6): the copy keeps the seam allowance
+      // already set on its source — a left/right pair gets the same seam.
+      seamAllowance: src.seamAllowance,
+      // phase-r8a: a copy starts in the same nest job as its source.
+      excluded: src.excluded,
+      sheet: false,
+      mirror: false,
+      // §9.3.3: tag so save/load can distinguish copies from import-
+      // origin parts (they share filename but have different lineage).
+      isMirrorCopy: true,
+      mirrorOfId: src.grainnestId,
+    };
+    // polygontree.source on the cloned tree still points at the
+    // *source's* index in *its* svgelements array — that's a number
+    // and survives the clone unchanged, and matches the new
+    // svgelements layout (we cloned them in order).
+    copy.bounds = GeometryUtil.getPolygonBounds(copy.polygontree);
+    copy.area = copy.bounds.width * copy.bounds.height;
+    this.parts.push(copy);
+    var newIndex = this.parts.length - 1;
+    this.mirrorPart(newIndex);
+    return newIndex;
+  };
+
+  // §9.3.2 behaviour 3 — "cut on the fold". Replace the part's polygon
+  // with the *doubled* piece: the half reflected across its fold line and
+  // unioned with the original, so it nests as one connected symmetric
+  // piece. v1 takes the fold line
+  // from getFoldLineForPart (an explicit foldline element, else the grain
+  // line — which must lie on the fold edge per the pattern convention).
+  // Returns true on success; false (unchanged) when there's no usable
+  // fold line or the union fails. unfoldPart restores the stored half.
+  foldPart(partIndex) {
+    var part = this.parts[partIndex];
+    if (!part || part.sheet || part.cutOnFold) return false;
+    var fold = getFoldLineForPart(part);
+    // §9.0.1 / phase-5t fix: snap the axis onto the piece's true fold edge so a
+    // grain line drawn a hair off the edge still doubles cleanly (piece 5's axis
+    // was 2 units outside its edge → reflected half didn't touch → no merge).
+    if (fold) fold = snapFoldAxisToEdge(part.polygontree, fold);
+
+    // §9.0.1 / phase-5t: fold diagnostics on EVERY path (incl. silent failures),
+    // so a piece whose "Cut on fold" does nothing still tells us why. Compares
+    // the fold axis to the half's own bounds — an axis off the half means the
+    // grain endpoints resolved in the wrong coordinate frame. deepnest_debug=1.
+    var _half = part.polygontree
+      ? GeometryUtil.getPolygonBounds(part.polygontree)
+      : null;
+    function _foldDbg(status, dbl) {
+      if (!grainnestDebugEnabled()) return;
+      try {
+        var _nm = null, _se = part.svgelements || [];
+        for (var _z = 0; _z < _se.length; _z++) {
+          if (_se[_z] && _se[_z].getAttribute) {
+            _nm = _se[_z].getAttribute("inkscape:label") || _se[_z].getAttribute("id");
+            if (_nm) break;
+          }
+        }
+        var _rec = {
+          name: _nm,
+          status: status,
+          fold: fold && {
+            x0: Math.round(fold.x0), y0: Math.round(fold.y0),
+            angDeg: Math.round((fold.ang * 180) / Math.PI),
+          },
+          half: _half && {
+            x: Math.round(_half.x), y: Math.round(_half.y),
+            w: Math.round(_half.width), h: Math.round(_half.height),
+          },
+          foldOnHalfEdge: fold && _half
+            ? fold.x0 >= _half.x - 5 && fold.x0 <= _half.x + _half.width + 5 &&
+              fold.y0 >= _half.y - 5 && fold.y0 <= _half.y + _half.height + 5
+            : null,
+          doubled: dbl && { w: Math.round(dbl.width), h: Math.round(dbl.height) },
+        };
+        require("fs").appendFileSync(
+          require("path").join(require("os").tmpdir(), "grainnest-fold-debug.jsonl"),
+          JSON.stringify(_rec) + "\n",
+        );
+        console.log("[grainnest] fold " + _nm + " -> " + status, _rec.fold, _rec.half);
+      } catch (_err) {
+        console.log("[grainnest] fold debug failed: " + _err.message);
+      }
+    }
+
+    if (!fold) { _foldDbg("NO_FOLD_AXIS"); return false; }
+
+    var outer = part.polygontree;
+    var reflected = reflectTreeAcrossLine(outer, fold.x0, fold.y0, fold.ang);
+    var doubledOuter = unionRingsFold(outer, reflected);
+    if (!doubledOuter || doubledOuter.length < 3) {
+      _foldDbg("UNION_FAILED");
+      return false;
+    }
+
+    // keep the doubled outer's winding consistent with the original so
+    // the NFP / placement code sees the orientation it expects.
+    if (
+      GeometryUtil.polygonArea(doubledOuter) * GeometryUtil.polygonArea(outer) <
+      0
+    ) {
+      doubledOuter.reverse();
+    }
+
+    // stash the half for unfold, then assemble the doubled tree:
+    // unioned outer + original holes + reflected holes.
+    part._foldHalfTree = this.cloneTree(outer);
+    part.foldLine = { x0: fold.x0, y0: fold.y0, ang: fold.ang };
+    doubledOuter.source = outer.source;
+    doubledOuter.children = [];
+    var holes = outer.children || [];
+    for (var i = 0; i < holes.length; i++) {
+      doubledOuter.children.push(this.cloneTree(holes[i]));
+      doubledOuter.children.push(
+        reflectTreeAcrossLine(holes[i], fold.x0, fold.y0, fold.ang),
+      );
+    }
+    part.polygontree = doubledOuter;
+    part.bounds = GeometryUtil.getPolygonBounds(part.polygontree);
+    part.area = part.bounds.width * part.bounds.height;
+    part.cutOnFold = true;
+    _foldDbg("OK", part.bounds);
+    return true;
+  };
+
+  // §9.0.1 R6-A — exact bounding box of a part at a given placement, in the
+  // sheet's coordinate frame. Reproduces the placement worker's convention
+  // exactly (background.js rotatePolygon): rotate the baked polygontree about
+  // the ORIGIN by placement.rotation (degrees), THEN translate by the
+  // placement (x, y). The old shortcut `p.x + part.bounds.width` ignored both
+  // the rotation and the polygon's own coordinate offset, so the min-length
+  // stat, Trim sheets, and the cut-list "length used" all disagreed with the
+  // real layout (testing round 6: stat said 171.5 in on a 160 in sheet with
+  // everything placed — and Trim *grew* the sheet to the overestimate).
+  // Only the outer ring matters for bounds (holes lie inside it).
+  // Returns {x, y, width, height}, or null when the part has no polygon.
+  placedBounds(part, placement) {
+    if (!part || !part.polygontree || part.polygontree.length < 3) return null;
+    var rad = (((placement && placement.rotation) || 0) * Math.PI) / 180;
+    var cos = Math.cos(rad);
+    var sin = Math.sin(rad);
+    var dx = (placement && placement.x) || 0;
+    var dy = (placement && placement.y) || 0;
+    var minx = null,
+      miny = null,
+      maxx = null,
+      maxy = null;
+    for (var i = 0; i < part.polygontree.length; i++) {
+      var px = part.polygontree[i].x;
+      var py = part.polygontree[i].y;
+      var x = px * cos - py * sin + dx;
+      var y = px * sin + py * cos + dy;
+      if (minx === null || x < minx) minx = x;
+      if (maxx === null || x > maxx) maxx = x;
+      if (miny === null || y < miny) miny = y;
+      if (maxy === null || y > maxy) maxy = y;
+    }
+    return { x: minx, y: miny, width: maxx - minx, height: maxy - miny };
+  };
+
+  // Undo foldPart: restore the stored half polygon.
+  unfoldPart(partIndex) {
+    var part = this.parts[partIndex];
+    if (!part || !part.cutOnFold) return false;
+    if (part._foldHalfTree) {
+      part.polygontree = part._foldHalfTree;
+      delete part._foldHalfTree;
+      part.bounds = GeometryUtil.getPolygonBounds(part.polygontree);
+      part.area = part.bounds.width * part.bounds.height;
+    }
+    part.cutOnFold = false;
+    return true;
+  };
+
   // progressCallback is called when progress is made
   // displayCallback is called when a new placement has been made
   start(p, d) {
@@ -1010,10 +1725,19 @@ export class DeepNest {
     // send only bare essentials through ipc
     for (var i = 0; i < this.parts.length; i++) {
       parts.push({
-        quantity: this.parts[i].quantity,
+        // phase-r8a: excluded pieces nest zero copies. They stay in the
+        // array (rather than being filtered out) so placement.source still
+        // indexes this.parts.
+        // v1.2.0: so do excluded sheets (no copies of that fabric).
+        quantity: this.parts[i].excluded ? 0 : this.parts[i].quantity,
         sheet: this.parts[i].sheet,
         polygontree: this.cloneTree(this.parts[i].polygontree),
         filename: this.parts[i].filename,
+        allowedRotations: grainRuleToRotations(
+          this.parts[i],
+          this.nap,
+          this.warpDirection,
+        ),
       });
     }
 
@@ -1205,6 +1929,9 @@ export class DeepNest {
             poly.id = id; // id is the unique id of all parts that will be nested, including cloned duplicates
             poly.source = i; // source is the id of each unique part from the main part list
             poly.filename = parts[i].filename;
+            if (parts[i].allowedRotations) {
+              poly.allowedRotations = parts[i].allowedRotations.slice();
+            }
 
             adam.push(poly);
             id++;
@@ -1507,6 +2234,364 @@ export class DeepNest {
   };
 }
 
+// Pick a rotation for a part. If the part declares allowedRotations,
+// sample uniformly from that set; otherwise fall back to the global
+// config.rotations-derived set (original deepnest behaviour).
+function pickRotation(part, config) {
+  var allowed = part && part.allowedRotations;
+  if (allowed && allowed.length > 0) {
+    return allowed[Math.floor(Math.random() * allowed.length)];
+  }
+  return Math.floor(Math.random() * config.rotations) *
+    (360 / config.rotations);
+}
+
+// Return true when [grainnest] diagnostic logging should fire. Opt-in
+// via either the env var (deepnest_debug=1 — same knob that opens
+// devtools at startup, see main.js) or by setting window.GRAINNEST_DEBUG
+// = true in devtools console. Default off so production runs stay quiet.
+function grainnestDebugEnabled() {
+  if (typeof window !== "undefined" && window.GRAINNEST_DEBUG) return true;
+  if (
+    typeof process !== "undefined" &&
+    process.env &&
+    process.env.deepnest_debug === "1"
+  )
+    return true;
+  return false;
+}
+
+// §9.3.2 mirror helper — flip every point in a polygontree (and its
+// children, recursively) about a vertical line at x = `axisX`. Used by
+// DeepNest.mirrorPart and DeepNest.mirrorCopyPart. Pure mutation; the
+// caller is responsible for updating any cached bounds.
+// §9.3.2 behaviour 3 (cut on the fold) geometry.
+
+// Reflect a point across the line through (x0,y0) at angle `ang`
+// (radians). Reflection about a line at angle θ uses the matrix
+// [[cos2θ, sin2θ], [sin2θ, -cos2θ]] applied to (p - origin).
+function reflectPointFold(px, py, x0, y0, ang) {
+  var dx = px - x0;
+  var dy = py - y0;
+  var c = Math.cos(2 * ang);
+  var s = Math.sin(2 * ang);
+  return { x: x0 + dx * c + dy * s, y: y0 + dx * s - dy * c };
+}
+
+// Deep-clone a polygontree with every point reflected across the fold
+// line. A reflection flips winding order, so each ring is reversed to
+// preserve its original orientation (outer stays outer, holes stay
+// holes) for a clean union and correct NFP behaviour.
+function reflectTreeAcrossLine(tree, x0, y0, ang) {
+  var out = [];
+  for (var i = 0; i < tree.length; i++) {
+    out.push(reflectPointFold(tree[i].x, tree[i].y, x0, y0, ang));
+  }
+  out.reverse();
+  if (tree.children && tree.children.length > 0) {
+    out.children = [];
+    for (var j = 0; j < tree.children.length; j++) {
+      out.children.push(reflectTreeAcrossLine(tree.children[j], x0, y0, ang));
+    }
+  }
+  return out;
+}
+
+// Union two simple rings (arrays of {x,y}) via ClipperLib, returning the
+// largest resulting ring in nest coordinates. Same Clipper union pattern
+// used by polygonOffset above. The two halves share the fold edge, so
+// the union dissolves that seam into one connected polygon.
+function unionRingsFold(ringA, ringB) {
+  function toClip(r) {
+    var out = [];
+    for (var i = 0; i < r.length; i++) out.push({ X: r[i].x, Y: r[i].y });
+    return out;
+  }
+  var A = toClip(ringA);
+  var B = toClip(ringB);
+  ClipperLib.JS.ScaleUpPath(A, 10000000);
+  ClipperLib.JS.ScaleUpPath(B, 10000000);
+  var combined = new ClipperLib.Paths();
+  var clipper = new ClipperLib.Clipper();
+  clipper.AddPath(A, ClipperLib.PolyType.ptSubject, true);
+  clipper.AddPath(B, ClipperLib.PolyType.ptSubject, true);
+  var best = null;
+  var bestArea = null;
+  if (
+    clipper.Execute(
+      ClipperLib.ClipType.ctUnion,
+      combined,
+      ClipperLib.PolyFillType.pftNonZero,
+      ClipperLib.PolyFillType.pftNonZero,
+    )
+  ) {
+    for (var i = 0; i < combined.length; i++) {
+      var n = [];
+      for (var k = 0; k < combined[i].length; k++) {
+        n.push({ x: combined[i][k].X / 10000000, y: combined[i][k].Y / 10000000 });
+      }
+      var area = Math.abs(GeometryUtil.polygonArea(n));
+      if (bestArea === null || area > bestArea) {
+        best = n;
+        bestArea = area;
+      }
+    }
+  }
+  return best;
+}
+
+// Resolve the fold line for a part. v1 priority: an explicit foldline
+// element (tagged data-grainnest-fold), else the grain line element
+// (data-grainnest-grain) — the pattern convention is that the fold edge is
+// the grainline itself. Falls back to the grain *angle* through the
+// bounding-box centre when only an angle is known (this is the case the
+// design note flags as unreliable for a centred manual mark). Returns
+// {x0, y0, ang(rad)} or null.
+function getFoldLineForPart(part) {
+  if (!part || !part.svgelements) return null;
+  function finish(x1, y1, x2, y2) {
+    if (
+      !isFinite(x1) || !isFinite(y1) || !isFinite(x2) || !isFinite(y2) ||
+      (x1 === x2 && y1 === y2)
+    ) {
+      return null;
+    }
+    return { x0: x1, y0: y1, ang: Math.atan2(y2 - y1, x2 - x1) };
+  }
+  // §9.3.2 / phase-5r: read the *drawn* fold/grain line's endpoints so the
+  // fold uses the actual line, not the bounding-box centre. Handles <line>
+  // and — for real Inkscape files (testing round 4) — <path>/<polyline>/
+  // <polygon>, whose grain lines are paths drawn on the fold edge.
+  function endpoints(el) {
+    if (!el || !el.tagName) return null;
+    if (el.tagName === "line") {
+      return finish(
+        parseFloat(el.getAttribute("x1")), parseFloat(el.getAttribute("y1")),
+        parseFloat(el.getAttribute("x2")), parseFloat(el.getAttribute("y2")),
+      );
+    }
+    if (el.tagName === "path") {
+      var ep = window.SvgParser.pathEndpoints(el.getAttribute("d") || "");
+      return ep ? finish(ep.x1, ep.y1, ep.x2, ep.y2) : null;
+    }
+    var pts = null;
+    if (el.tagName === "polyline" || el.tagName === "polygon") {
+      var raw = (el.getAttribute("points") || "").trim().split(/[\s,]+/).map(parseFloat);
+      pts = [];
+      for (var k = 0; k + 1 < raw.length; k += 2) pts.push({ x: raw[k], y: raw[k + 1] });
+    }
+    if (!pts || pts.length < 2) return null;
+    return finish(pts[0].x, pts[0].y, pts[pts.length - 1].x, pts[pts.length - 1].y);
+  }
+  var fold = null;
+  var grain = null;
+  for (var i = 0; i < part.svgelements.length; i++) {
+    var e = part.svgelements[i];
+    if (!e || !e.getAttribute) continue;
+    if (e.getAttribute("data-grainnest-fold") === "1" && !fold) fold = e;
+    if (e.getAttribute("data-grainnest-grain") === "1" && !grain) grain = e;
+  }
+  var fromEl = endpoints(fold) || endpoints(grain);
+  if (fromEl) return fromEl;
+  if (part.bounds && typeof part.grainAngle === "number") {
+    return {
+      x0: part.bounds.x + part.bounds.width / 2,
+      y0: part.bounds.y + part.bounds.height / 2,
+      ang: (part.grainAngle * Math.PI) / 180,
+    };
+  }
+  return null;
+}
+
+// §9.0.1 / phase-5t: snap a fold axis onto the piece's true fold edge. The
+// drawn grain/fold line can sit a hair off the straight edge it's meant to lie
+// on (a real file's grain-5 was ~2 units outside piece 5's edge). Reflecting across an
+// axis even slightly outside the piece leaves the mirrored half not touching the
+// original, so unionRingsFold can't merge them and the fold silently does
+// nothing (or strands the reflected half off-sheet). Find the polygon edge most
+// parallel to, and nearest, the drawn line and adopt it as the axis — but only
+// when it's close (grain is supposed to be on the edge), so a genuinely interior
+// line is left alone.
+function snapFoldAxisToEdge(poly, fold) {
+  if (!poly || poly.length < 3 || !fold) return fold;
+  var EPS = (6 * Math.PI) / 180; // within 6° counts as parallel
+  var minx = Infinity, miny = Infinity, maxx = -Infinity, maxy = -Infinity;
+  for (var k = 0; k < poly.length; k++) {
+    if (poly[k].x < minx) minx = poly[k].x;
+    if (poly[k].x > maxx) maxx = poly[k].x;
+    if (poly[k].y < miny) miny = poly[k].y;
+    if (poly[k].y > maxy) maxy = poly[k].y;
+  }
+  var threshold = 0.05 * Math.max(maxx - minx, maxy - miny);
+  var best = null, bestDist = Infinity;
+  for (var i = 0; i < poly.length; i++) {
+    var a = poly[i], b = poly[(i + 1) % poly.length];
+    var dx = b.x - a.x, dy = b.y - a.y;
+    var len = Math.sqrt(dx * dx + dy * dy);
+    if (len < 1e-6) continue;
+    var ea = Math.atan2(dy, dx);
+    var da = (((ea - fold.ang) % Math.PI) + Math.PI) % Math.PI; // 0..π
+    if (da > EPS && da < Math.PI - EPS) continue; // not parallel to the line
+    var dist = Math.abs((fold.x0 - a.x) * dy - (fold.y0 - a.y) * dx) / len;
+    if (dist < bestDist) {
+      bestDist = dist;
+      best = { x0: a.x, y0: a.y, ang: ea };
+    }
+  }
+  return best && bestDist <= threshold ? best : fold;
+}
+
+function mirrorPolygontreeX(tree, axisX) {
+  for (var i = 0; i < tree.length; i++) {
+    tree[i].x = 2 * axisX - tree[i].x;
+  }
+  // §9.0.1 R6-C: a reflection flips winding order — reverse the ring to
+  // restore its original orientation, exactly as reflectTreeAcrossLine
+  // (the fold reflection) already does "for correct NFP behaviour". The
+  // missing reversal left every mirrored part wound backwards; most
+  // shapes survived it, but the placement engine refused to place the
+  // big concave shrug piece's mirror copy at all (testing round 6: "0/2
+  // placed no matter how big the sheet"). Mirroring twice still
+  // round-trips: the point flip and the order reversal both self-invert
+  // and commute.
+  tree.reverse();
+  if (tree.children && tree.children.length > 0) {
+    for (var j = 0; j < tree.children.length; j++) {
+      mirrorPolygontreeX(tree.children[j], axisX);
+    }
+  }
+}
+
+// §9.3.12: derive a human-friendly piece name from the source SVG.
+// Priority: inkscape:label (Inkscape's per-object/group "Label", the most
+// likely real-world source) on the element or an ancestor group; then a
+// <title> direct child (Inkscape's "Title"); then a meaningful id
+// (skipping auto-generated ids like path1234 / g12) on the element or an
+// ancestor. Inkscape *layer* groups and the <svg> root are skipped so a
+// document/layer label can't end up naming every piece the same.
+// Returns undefined when nothing usable is found — the part stays unnamed
+// and the UI shows the filename as a placeholder for the user to fill.
+function extractPartName(el) {
+  var AUTO_ID = /^(path|g|rect|svg|polygon|polyline|use|circle|ellipse|line|tspan|text|defs|image|clip|mask)\d+$/i;
+  function isLayer(n) {
+    return !!(n.getAttribute && n.getAttribute("inkscape:groupmode") === "layer");
+  }
+  function isSvgRoot(n) {
+    return !!(n.tagName && String(n.tagName).toLowerCase() === "svg");
+  }
+  var n, hops;
+  // 1. inkscape:label on the element or an ancestor group
+  for (n = el, hops = 0; n && n.getAttribute && !isSvgRoot(n) && hops < 6; n = n.parentElement, hops++) {
+    if (isLayer(n)) continue;
+    var label = n.getAttribute("inkscape:label");
+    if (label && label.trim()) return label.trim();
+  }
+  // 2. <title> as a direct child of the root element
+  if (el && el.children) {
+    for (var k = 0; k < el.children.length; k++) {
+      var child = el.children[k];
+      if (
+        child.tagName &&
+        String(child.tagName).toLowerCase() === "title" &&
+        child.textContent &&
+        child.textContent.trim()
+      ) {
+        return child.textContent.trim();
+      }
+    }
+  }
+  // 3. meaningful id on the element or an ancestor group
+  for (n = el, hops = 0; n && n.getAttribute && !isSvgRoot(n) && hops < 6; n = n.parentElement, hops++) {
+    if (isLayer(n)) continue;
+    var id = n.getAttribute("id");
+    if (id && id.trim() && !AUTO_ID.test(id.trim())) return id.trim();
+  }
+  return undefined;
+}
+
+// Shared post-claim hook used by every branch of DeepNest.getParts's
+// "attach open elements to a part" loop. If the element was tagged as
+// a grain during cleanInput's detectGrainLines pass (which marks
+// <line>/<polyline>/<polygon>/two-point <path> the same way), flip
+// the part's defaults so it ends up Locked to the detected angle.
+// Originally inlined inside the <line> branch only — which left
+// <path>/<polyline>/<polygon> grains visually dashed but functionally
+// "Free" (§9.1).
+function recordGrainIfTagged(part, el) {
+  if (
+    el.getAttribute &&
+    el.getAttribute("data-grainnest-grain") === "1"
+  ) {
+    var angleAttr = el.getAttribute("data-grainnest-grain-angle");
+    if (angleAttr !== null && !isNaN(Number(angleAttr))) {
+      part.grainAngle = Number(angleAttr);
+      part.grainSource = "detected";
+      part.grainRule = "lock";
+    }
+  }
+}
+
+// Translate a part's UI-level grainRule into a concrete allowedRotations
+// array consumed by the GA. Returns undefined for "free" so the GA falls
+// through to the global config.rotations behaviour. The custom-tolerance
+// value is hard-coded to 3° in Phase 2; Phase 3 will read it from settings.
+//
+// When the part has a `grainAngle` (set by Phase 3's SVG detector), the
+// returned rotations are shifted by -grainAngle so that "Lock to grain"
+// (base [0]) actually rotates the piece by -grainAngle and ends with the
+// grain horizontal. Same offset applied uniformly to "flipped", "bias",
+// and "custom"; "free" stays unconstrained regardless of grain.
+var GRAIN_RULE_CUSTOM_TOLERANCE = 3;
+// §9.3.4: when `nap` is true, every rule collapses to a single
+// principal rotation so a napped fabric doesn't get pieces facing
+// different directions down the bolt. Bias under nap defaults to
+// +45° (the open question of per-piece sign is tracked in §9.4).
+// "Custom" stays as-is — its ±tol set is small enough that all
+// rotations within it preserve up-direction. "Free" under nap
+// behaves like "lock" (one allowed rotation at 0°).
+//
+// §9.3.10: `warpDirection` ("horizontal" default, "vertical" optional)
+// sets the target angle the grain should land at after rotation.
+// Horizontal target = 0° (the historical behaviour); vertical = 90°.
+// Offset is computed as (targetAngle - grainAngle) so a piece with a
+// 30° source grain and warp=horizontal rotates by -30°, same as
+// before; with warp=vertical it rotates by +60° (90 - 30).
+function grainRuleToRotations(part, nap, warpDirection) {
+  var base;
+  switch (part && part.grainRule) {
+    case "lock":
+      base = [0];
+      break;
+    case "flipped":
+      base = nap ? [0] : [0, 180];
+      break;
+    case "bias":
+      base = nap ? [45] : [45, 135];
+      break;
+    case "custom": {
+      var t = GRAIN_RULE_CUSTOM_TOLERANCE;
+      base = [0, t, (360 - t) % 360];
+      break;
+    }
+    case "free":
+    default:
+      return nap ? [0] : undefined;
+  }
+  var grainAngle = (part && part.grainAngle) || 0;
+  // phase-r8c: the folded grainAngle's "+180°" end is the piece's top, and
+  // rotating by -grainAngle sends it to 180° — the left of the sheet, i.e.
+  // the start of the fabric. topFlip makes the other end the top.
+  if (part && part.topFlip) grainAngle += 180;
+  var targetAngle = warpDirection === "vertical" ? 90 : 0;
+  // Always apply the offset shift — even when grainAngle is 0, a
+  // vertical-warp target needs +90° baked in. Folding to [0, 360).
+  var offset = ((targetAngle - grainAngle) % 360 + 360) % 360;
+  if (offset === 0) return base;
+  return base.map(function (r) {
+    return ((r + offset) % 360 + 360) % 360;
+  });
+}
+
 export class GeneticAlgorithm {
   constructor(adam, config) {
     this.config = config || {
@@ -1518,10 +2603,7 @@ export class GeneticAlgorithm {
     // population is an array of individuals. Each individual is a object representing the order of insertion and the angle each part is rotated
     var angles = [];
     for (var i = 0; i < adam.length; i++) {
-      var angle =
-        Math.floor(Math.random() * this.config.rotations) *
-        (360 / this.config.rotations);
-      angles.push(angle);
+      angles.push(pickRotation(adam[i], this.config));
     }
 
     this.population = [{ placement: adam, rotation: angles }];
@@ -1548,14 +2630,22 @@ export class GeneticAlgorithm {
           var temp = clone.placement[i];
           clone.placement[i] = clone.placement[j];
           clone.placement[j] = temp;
+
+          // Also swap the rotations so each piece keeps the rotation it
+          // was paired with. Without this, a piece's rotation can end up
+          // outside its allowedRotations set after a swap (the original
+          // deepnest got away with this because every piece shared the
+          // same global rotation set; per-piece grain constraints expose
+          // the issue).
+          var temprot = clone.rotation[i];
+          clone.rotation[i] = clone.rotation[j];
+          clone.rotation[j] = temprot;
         }
       }
 
       rand = Math.random();
       if (rand < 0.01 * this.config.mutationRate) {
-        clone.rotation[i] =
-          Math.floor(Math.random() * this.config.rotations) *
-          (360 / this.config.rotations);
+        clone.rotation[i] = pickRotation(clone.placement[i], this.config);
       }
     }
 

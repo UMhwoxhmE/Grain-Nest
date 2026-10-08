@@ -21,11 +21,33 @@ test("Nest", async ({}, testInfo) => {
   }
 
   const electronApp = await electron.launch({
-    args: ["main.js"],
-    recordVideo: { dir: testInfo.outputDir },
+    args: ["main.js", "--no-sandbox"], // CI runs non-root: no Electron SUID sandbox
+    // Video aids local debugging, but recording it freezes the renderer's
+    // timers in the headless CI window, which stalls the readiness poll below
+    // (and any other interaction). Record locally only; CI relies on traces.
+    recordVideo: process.env.CI ? undefined : { dir: testInfo.outputDir },
   });
 
   const mainWindow = await electronApp.firstWindow();
+
+  // Wait for the renderer to finish booting (DeepNest + SvgParser wired up)
+  // before interacting. On a cold CI runner, clicking #config_tab before boot
+  // completes makes the click hang until the test times out. Poll with a timer
+  // rather than page.waitForFunction — the latter's default requestAnimationFrame
+  // polling is throttled in this headless/video-recorded window and never fires.
+  // (Diagnosed 2026-06-07.)
+  await mainWindow.evaluate(async () => {
+    const start = Date.now();
+    while (Date.now() - start < 20000) {
+      const w = window as unknown as {
+        DeepNest?: unknown;
+        SvgParser?: unknown;
+      };
+      if (w.DeepNest && w.SvgParser) return;
+      await new Promise((r) => setTimeout(r, 50));
+    }
+    throw new Error("renderer not ready (DeepNest/SvgParser) after 20s");
+  });
 
   const consoleDump = testInfo.outputPath("console.txt");
   if (pipeConsole) {
@@ -91,16 +113,16 @@ test("Nest", async ({}, testInfo) => {
     });
     const sharedConfig: Partial<DeepNestConfig> = {
       curveTolerance: 0.72,
-      mergeLines: true,
+      mergeLines: false, // v1.3.0: laser options retired (settings review)
       mutationRate: 10,
       placementType: "gravity",
       populationSize: 10,
       rotations: 4,
-      scale: 72,
+      scale: 96, // 96-DPI default since phase-5r (testing round 4); was 72 (points)
       simplify: false,
-      spacing: 28.34645669291339,
+      spacing: 37.795275590551185, // 10mm at 96 DPI (10 * 96 / 25.4)
       threads: 4,
-      timeRatio: 0.5,
+      timeRatio: 0, // v1.3.0: nests scored on fabric only
     };
     expect(config).toMatchObject({
       ...sharedConfig,
@@ -119,9 +141,12 @@ test("Nest", async ({}, testInfo) => {
 
   await test.step("Upload files", async () => {
     const inputDir = path.resolve(__dirname, "assets");
-    const files = (await readdir(inputDir))
-      .filter((file) => path.extname(file) === ".svg")
-      .map((file) => path.resolve(inputDir, file));
+    // Only the two garment SVGs. tests/assets also holds the synthetic
+    // fixtures the grain/sew/mirror specs import; globbing the whole dir would
+    // inflate the import count and the 54/54 placement total asserted below.
+    const files = ["henny-penny.svg", "mrs-saint-delafield.svg"].map((file) =>
+      path.resolve(inputDir, file),
+    );
     await electronApp.evaluate(({ dialog }, paths) => {
       dialog.showOpenDialog = async (): Promise<OpenDialogReturnValue> => ({
         filePaths: paths,

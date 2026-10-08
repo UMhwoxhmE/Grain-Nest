@@ -11,7 +11,6 @@ import type {
   RactiveInstance,
   PartsViewData,
 } from "../types/index.js";
-import { DEFAULT_CONVERSION_SERVER } from "../types/index.js";
 import { message } from "../utils/ui-helpers.js";
 
 /**
@@ -60,7 +59,7 @@ interface FileSystem {
   readFile(
     path: string,
     encoding: string,
-    callback: (err: Error | null, data: string) => void
+    callback: (err: Error | null, data: string) => void,
   ): void;
   readdirSync(path: string): string[];
 }
@@ -81,7 +80,7 @@ interface HttpClient {
   post(
     url: string,
     data: Buffer,
-    options: { headers: Record<string, string>; responseType: string }
+    options: { headers: Record<string, string>; responseType: string },
   ): Promise<{ data: string }>;
 }
 
@@ -92,7 +91,7 @@ interface FormDataLike {
   append(
     name: string,
     value: Buffer | string,
-    options?: { filename?: string; contentType?: string }
+    options?: { filename?: string; contentType?: string },
   ): void;
   getBuffer(): Buffer;
   getHeaders(): Record<string, string>;
@@ -124,7 +123,9 @@ interface SvgPreProcessor {
  * Config getter interface
  */
 interface ConfigGetter {
-  getSync<K extends keyof UIConfig>(key?: K): K extends keyof UIConfig ? UIConfig[K] : UIConfig;
+  getSync<K extends keyof UIConfig>(
+    key?: K,
+  ): K extends keyof UIConfig ? UIConfig[K] : UIConfig;
 }
 
 /**
@@ -132,17 +133,14 @@ interface ConfigGetter {
  */
 const SUPPORTED_EXTENSIONS = {
   SVG: [".svg"],
-  NEEDS_CONVERSION: [".ps", ".eps", ".dxf", ".dwg"],
 } as const;
 
 /**
  * File filters for the open dialog
  */
-const FILE_FILTERS: FileFilter[] = [
-  { name: "CAD formats", extensions: ["svg", "ps", "eps", "dxf", "dwg"] },
-  { name: "SVG/EPS/PS", extensions: ["svg", "eps", "ps"] },
-  { name: "DXF/DWG", extensions: ["dxf", "dwg"] },
-];
+// v1.3.0: SVG only. DXF / DWG / EPS / PS used to be uploaded to
+// Deepnest's online conversion service; that path is gone.
+const FILE_FILTERS: FileFilter[] = [{ name: "SVG", extensions: ["svg"] }];
 
 /**
  * Import Service class
@@ -161,12 +159,6 @@ export class ImportService {
 
   /** Node.js path module */
   private path: PathModule | null = null;
-
-  /** HTTP client for conversion requests */
-  private httpClient: HttpClient | null = null;
-
-  /** FormData constructor for file upload */
-  private FormData: FormDataConstructor | null = null;
 
   /** SVG pre-processor for cleaning input */
   private svgPreProcessor: SvgPreProcessor | null = null;
@@ -216,8 +208,6 @@ export class ImportService {
       this.remote = options.remote || null;
       this.fs = options.fs || null;
       this.path = options.path || null;
-      this.httpClient = options.httpClient || null;
-      this.FormData = options.FormData || null;
       this.svgPreProcessor = options.svgPreProcessor || null;
       this.config = options.config || null;
       this.deepNest = options.deepNest || null;
@@ -258,22 +248,6 @@ export class ImportService {
    */
   setPath(path: PathModule): void {
     this.path = path;
-  }
-
-  /**
-   * Set the HTTP client for conversion requests
-   * @param httpClient - HTTP client (e.g., axios)
-   */
-  setHttpClient(httpClient: HttpClient): void {
-    this.httpClient = httpClient;
-  }
-
-  /**
-   * Set the FormData constructor
-   * @param FormData - FormData constructor
-   */
-  setFormDataConstructor(FormData: FormDataConstructor): void {
-    this.FormData = FormData;
   }
 
   /**
@@ -329,40 +303,6 @@ export class ImportService {
   }
 
   /**
-   * Get the conversion server URL from config or use default
-   * @returns Conversion server URL
-   */
-  private getConversionServerUrl(): string {
-    if (!this.config) {
-      return DEFAULT_CONVERSION_SERVER;
-    }
-
-    const configUrl = this.config.getSync("conversionServer");
-    return configUrl || DEFAULT_CONVERSION_SERVER;
-  }
-
-  /**
-   * Check if a file extension requires conversion
-   * @param extension - File extension (with leading dot)
-   * @returns True if the file needs conversion
-   */
-  private needsConversion(extension: string): boolean {
-    const lowerExt = extension.toLowerCase();
-    return SUPPORTED_EXTENSIONS.NEEDS_CONVERSION.some(
-      (ext) => ext === lowerExt
-    );
-  }
-
-  /**
-   * Check if a file extension is a DXF file
-   * @param extension - File extension (with leading dot)
-   * @returns True if the file is a DXF
-   */
-  private isDxf(extension: string): boolean {
-    return extension.toLowerCase() === ".dxf";
-  }
-
-  /**
    * Load files from the nest directory on startup
    * @returns Promise that resolves when all files are loaded
    */
@@ -378,9 +318,7 @@ export class ImportService {
 
     try {
       const files = this.fs.readdirSync(nestDirectory);
-      const svgFiles = files
-        .filter((file) => file.includes(".svg"))
-        .sort();
+      const svgFiles = files.filter((file) => file.includes(".svg")).sort();
 
       for (const file of svgFiles) {
         await this.processFile(nestDirectory + file);
@@ -440,8 +378,11 @@ export class ImportService {
 
     if (ext.toLowerCase() === ".svg") {
       await this.readSvgFile(filePath);
-    } else if (this.needsConversion(ext)) {
-      await this.convertAndImport(filePath, filename, ext);
+    } else {
+      message(
+        `Grain-Nest imports SVG files only — "${filename}" wasn't imported.`,
+        true,
+      );
     }
   }
 
@@ -473,91 +414,6 @@ export class ImportService {
   }
 
   /**
-   * Convert a non-SVG file to SVG using the conversion server
-   * @param filePath - Full path to the file
-   * @param filename - Base filename
-   * @param ext - File extension
-   */
-  private async convertAndImport(
-    filePath: string,
-    filename: string,
-    ext: string
-  ): Promise<void> {
-    if (!this.fs || !this.httpClient || !this.FormData) {
-      message("Required modules not available for conversion", true);
-      return;
-    }
-
-    const url = this.getConversionServerUrl();
-
-    try {
-      const fileBuffer = this.fs.readFileSync(filePath);
-      const formData = new this.FormData();
-
-      formData.append("fileUpload", fileBuffer, {
-        filename: filename,
-        contentType: "application/dxf",
-      });
-      formData.append("format", "svg");
-
-      const response = await this.httpClient.post(url, formData.getBuffer(), {
-        headers: formData.getHeaders(),
-        responseType: "text",
-      });
-
-      const body = response.data;
-
-      // Check for error responses
-      if (body.substring(0, 5) === "error") {
-        message(body, true);
-        return;
-      }
-
-      if (body.includes('"error"') && body.includes('"error_id"')) {
-        const jsonErr = JSON.parse(body) as { error_id: string };
-        message(
-          `There was an Error while converting: ${jsonErr.error_id}<br>Please use this code to open an issue on github.com/deepnest-next/deepnest`,
-          true
-        );
-        return;
-      }
-
-      // Calculate scaling factor for DXF files
-      let scalingFactor: number | null = null;
-      let dxfFlag = false;
-
-      if (this.isDxf(ext)) {
-        scalingFactor = Number(this.config?.getSync("dxfImportScale")) || 1;
-        dxfFlag = true;
-      }
-
-      // Process the converted SVG
-      // Note: dirpath is null for converted files as they won't have embedded images
-      this.processSvgData(body, filename, null, scalingFactor, dxfFlag);
-    } catch (err) {
-      const error = err as { response?: { data: string }; message: string };
-      const errorData = error.response?.data || error.message;
-
-      if (
-        typeof errorData === "string" &&
-        errorData.includes('"error"') &&
-        errorData.includes('"error_id"')
-      ) {
-        const jsonErr = JSON.parse(errorData) as { error_id: string };
-        message(
-          `There was an Error while converting: ${jsonErr.error_id}<br>Please use this code to open an issue on github.com/deepnest-next/deepnest`,
-          true
-        );
-      } else {
-        message(
-          `Could not contact file conversion server: ${JSON.stringify(err)}<br>Please use this code to open an issue on github.com/deepnest-next/deepnest`,
-          true
-        );
-      }
-    }
-  }
-
-  /**
    * Process SVG data (either from file or conversion)
    * Optionally runs through SVG pre-processor
    * @param data - SVG content as string
@@ -571,7 +427,7 @@ export class ImportService {
     filename: string,
     dirpath: string | null,
     scalingFactor: number | null = null,
-    dxfFlag = false
+    dxfFlag = false,
   ): void {
     const useSvgPreProcessor = this.config?.getSync("useSvgPreProcessor");
 
@@ -585,7 +441,13 @@ export class ImportService {
           return;
         }
 
-        this.importData(svgResult.result, filename, dirpath, scalingFactor, dxfFlag);
+        this.importData(
+          svgResult.result,
+          filename,
+          dirpath,
+          scalingFactor,
+          dxfFlag,
+        );
       } catch (e) {
         const error = e as Error;
         message("Error processing SVG: " + error.message, true);
@@ -608,7 +470,7 @@ export class ImportService {
     filename: string,
     dirpath: string | null,
     scalingFactor: number | null = null,
-    dxfFlag = false
+    dxfFlag = false,
   ): void {
     if (!this.deepNest) {
       message("DeepNest instance not available", true);
@@ -669,7 +531,7 @@ export class ImportService {
       scalingFactor?: number | null;
       dxfFlag?: boolean;
       usePreProcessor?: boolean;
-    }
+    },
   ): Part[] | null {
     if (!this.deepNest) {
       message("DeepNest instance not available", true);
@@ -706,7 +568,7 @@ export class ImportService {
       dirpath,
       processedData,
       scalingFactor,
-      dxfFlag
+      dxfFlag,
     );
 
     // Deselect all previous imports
@@ -754,7 +616,9 @@ export class ImportService {
    * @param options - Optional configuration options
    * @returns New ImportService instance
    */
-  static create(options?: ConstructorParameters<typeof ImportService>[0]): ImportService {
+  static create(
+    options?: ConstructorParameters<typeof ImportService>[0],
+  ): ImportService {
     return new ImportService(options);
   }
 }
@@ -765,7 +629,7 @@ export class ImportService {
  * @returns New ImportService instance
  */
 export function createImportService(
-  options?: ConstructorParameters<typeof ImportService>[0]
+  options?: ConstructorParameters<typeof ImportService>[0],
 ): ImportService {
   return ImportService.create(options);
 }

@@ -1,233 +1,63 @@
 name: build release
 
+# Builds Grain-Nest.app (macOS, Apple Silicon / arm64) and attaches its disk
+# image (.dmg) to a GitHub release.
+#
+# - Publishing a release on GitHub runs this automatically for that release.
+# - A manual run (Actions tab → build release → Run workflow) takes a version
+#   tag, e.g. v1.1.0. If no release with that tag exists yet, it is created
+#   (tag on the commit the run was started from) once the app has built, so a
+#   failed build never leaves an empty release. If it exists, the disk image
+#   on it is replaced.
+#
+# The Mac build itself lives in build.yml; this file just calls it and then
+# publishes the result from a (cheaper) Linux machine.
+
 on:
   workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release version tag, e.g. v1.1.0"
+        required: true
+      notes:
+        description: "Release notes (optional; blank = list of merged changes)"
+        required: false
   release:
     types: [published]
 
 jobs:
-  build-and-release-linux:
-    env:
-      BUILD_FOR_OS: linux
-    strategy:
-      matrix:
-        node-version: [22.x]
-        os: [ubuntu-24.04, ubuntu-24.04-arm]
-    runs-on: ${{ matrix.os }}
+  build:
+    uses: ./.github/workflows/build.yml
+
+  attach-to-release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
         with:
-          submodules: recursive
+          name: grain-nest-macos-arm64
 
-      - name: Install Boost (only for Ubuntu)
-        if: startsWith(matrix.os, 'ubuntu')
-        run: sudo apt-get update && sudo apt-get install -yq libboost-dev
-
-      - name: Setup Node.js ${{ matrix.node-version }}
-        uses: actions/setup-node@v4
-        with:
-          node-version: ${{ matrix.node-version }}
-
-      - name: Set architecture
-        id: set_arch
+      - name: Create the release if it doesn't exist yet
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ inputs.tag }}
+          NOTES: ${{ inputs.notes }}
         run: |
-          # Check if the runner OS includes "arm" and set the ARCH environment variable accordingly
-          if [[ "${{ matrix.os }}" == "ubuntu-24.04-arm" ]]; then
-            echo "ARCH=arm64" >> $GITHUB_ENV
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Release $TAG already exists — replacing its disk image."
+          elif [ -n "$NOTES" ]; then
+            gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
+              --title "Grain-Nest $TAG" --notes "$NOTES"
           else
-            echo "ARCH=x64" >> $GITHUB_ENV
+            gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
+              --title "Grain-Nest $TAG" --generate-notes
           fi
-          echo "Architecture set to: $ARCH"
 
-      - name: Get latest release
-        id: get_release
-        uses: actions/github-script@v6
-        with:
-          script: |
-            // Retrieve the latest release information using the GitHub API
-            const release = await github.rest.repos.getLatestRelease({
-              owner: context.repo.owner,
-              repo: context.repo.repo
-            });
-            core.setOutput("upload_url", release.data.upload_url);
-            core.setOutput("release_id", release.data.id);
-            core.setOutput("tag", release.data.tag_name);
-            console.log("Found release:", release.data.tag_name);
-
-      - name: Build project
-        run: |
-          # Install dependencies and run the build script
-          npm install
-          npm run build
-
-      - name: Package build
-        run: |
-          # Retrieve the release tag from the previous step
-          TAG=${{ steps.get_release.outputs.tag }}
-          # Set the build directory name using the release tag and architecture
-          BUILD_DIR="deepnest-${TAG}-${BUILD_FOR_OS}-${ARCH}"
-          echo "Creating build in: $BUILD_DIR"
-          # Run Electron Packager to package the application into the specified build directory
-          npx @electron/packager . "deepnest-${TAG}" --overwrite
-          # Zip the build directory with the same name
-          zip -r "${BUILD_DIR}.zip" "$BUILD_DIR"
-      - name: Artefakt an letztes Release anhängen
-        uses: actions/upload-release-asset@v1
+      - name: Attach the Grain-Nest disk image to the release
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ steps.get_release.outputs.upload_url }}
-          asset_path: deepnest-${{ steps.get_release.outputs.tag }}-${{ env.BUILD_FOR_OS}}-${{ env.ARCH }}.zip
-          asset_name: deepnest-${{ steps.get_release.outputs.tag }}-${{ env.BUILD_FOR_OS}}-${{ env.ARCH }}.zip
-          asset_content_type: application/zip
-
-
-
-  build-and-release-macos:
-    env:
-      BUILD_FOR_OS: darwin
-    strategy:
-      matrix:
-        node-version: [22.x]
-        os: [macos-13, macos-latest]
-    runs-on: ${{ matrix.os }}
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          submodules: recursive
-
-      - name: Install Boost (only for Ubuntu)
-        if: startsWith(matrix.os, 'ubuntu')
-        run: sudo apt-get update && sudo apt-get install -yq libboost-dev
-
-      - name: Setup Node.js ${{ matrix.node-version }}
-        uses: actions/setup-node@v4
-        with:
-          node-version: ${{ matrix.node-version }}
-
-      - name: Set architecture
-        id: set_arch
-        run: |
-          # Check if the runner OS includes "arm" and set the ARCH environment variable accordingly
-          if [[ "${{ matrix.os }}" == "macos-latest" ]]; then
-            echo "ARCH=arm64" >> $GITHUB_ENV
-          else
-            echo "ARCH=x64" >> $GITHUB_ENV
-          fi
-          echo "Architecture set to: $ARCH"
-
-      - name: Get latest release
-        id: get_release
-        uses: actions/github-script@v6
-        with:
-          script: |
-            // Retrieve the latest release information using the GitHub API
-            const release = await github.rest.repos.getLatestRelease({
-              owner: context.repo.owner,
-              repo: context.repo.repo
-            });
-            core.setOutput("upload_url", release.data.upload_url);
-            core.setOutput("release_id", release.data.id);
-            core.setOutput("tag", release.data.tag_name);
-            console.log("Found release:", release.data.tag_name);
-
-      - name: Build project
-        run: |
-          # Install dependencies and run the build script
-          npm install
-          npm run build
-
-      - name: Package build
-        run: |
-          # Retrieve the release tag from the previous step
-          TAG=${{ steps.get_release.outputs.tag }}
-          # Set the build directory name using the release tag and architecture
-          BUILD_DIR="deepnest-${TAG}-${BUILD_FOR_OS}-${ARCH}"
-          echo "Creating build in: $BUILD_DIR"
-          # Run Electron Packager to package the application into the specified build directory
-          npx @electron/packager . "deepnest-${TAG}" --overwrite
-          # Zip the build directory with the same name
-          zip -r "${BUILD_DIR}.zip" "$BUILD_DIR"
-
-      - name: Artefakt an letztes Release anhängen
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ steps.get_release.outputs.upload_url }}
-          asset_path: deepnest-${{ steps.get_release.outputs.tag }}-${{ env.BUILD_FOR_OS}}-${{ env.ARCH }}.zip
-          asset_name: deepnest-${{ steps.get_release.outputs.tag }}-${{ env.BUILD_FOR_OS}}-${{ env.ARCH }}.zip
-          asset_content_type: application/zip
-
-  build-and-release-windows:
-    env:
-      BUILD_FOR_OS: win32
-    strategy:
-      matrix:
-        node-version: [22.x]
-        os: [windows-latest]
-    runs-on: ${{ matrix.os }}
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          submodules: recursive
-
-      - name: Setup Node.js ${{ matrix.node-version }}
-        uses: actions/setup-node@v4
-        with:
-          node-version: ${{ matrix.node-version }}
-
-      - name: Set architecture
-        id: set_arch
-        run: |
-          echo "ARCH=x64" >> $env:GITHUB_ENV
-          echo "Architecture set to: x64"
-        shell: pwsh
-
-      - name: Get latest release
-        id: get_release
-        uses: actions/github-script@v6
-        with:
-          script: |
-            // Retrieve the latest release information using the GitHub API
-            const release = await github.rest.repos.getLatestRelease({
-              owner: context.repo.owner,
-              repo: context.repo.repo
-            });
-            core.setOutput("upload_url", release.data.upload_url);
-            core.setOutput("release_id", release.data.id);
-            core.setOutput("tag", release.data.tag_name);
-            console.log("Found release:", release.data.tag_name);
-
-      - name: Build project
-        run: |
-          # Install dependencies and run the build script
-          npm install
-          npm run build
-        shell: bash
-
-      - name: Package build
-        run: |
-          # Retrieve the release tag from the previous step
-          TAG=${{ steps.get_release.outputs.tag }}
-          # Set the build directory name using the release tag and architecture
-          BUILD_DIR="deepnest-${TAG}-${BUILD_FOR_OS}-${ARCH}"
-          echo "Creating build in: $BUILD_DIR"
-          # Run Electron Packager to package the application into the specified build directory
-          npx @electron/packager . "deepnest-${TAG}" --overwrite
-          # Zip the build directory with the same name
-          7z a "${BUILD_DIR}.zip" "$BUILD_DIR"
-        shell: bash
-
-      - name: Artefakt an letztes Release anhängen
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ steps.get_release.outputs.upload_url }}
-          asset_path: deepnest-${{ steps.get_release.outputs.tag }}-${{ env.BUILD_FOR_OS}}-${{ env.ARCH }}.zip
-          asset_name: deepnest-${{ steps.get_release.outputs.tag }}-${{ env.BUILD_FOR_OS}}-${{ env.ARCH }}.zip
-          asset_content_type: application/zip
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.event.release.tag_name || inputs.tag }}
+        run: gh release upload "$TAG" grain-nest-v*-macos-arm64.dmg --clobber --repo "$GITHUB_REPOSITORY"

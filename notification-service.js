@@ -4,43 +4,51 @@ const path = require('path');
 const { app } = require('electron');
 const marked = require("marked");
 
+// v1.3.0 (settings review): "new version" notice for Grain-Nest
+// itself. Replaces the upstream Deepnest service, which checked
+// deepnest-next/deepnest's releases and the deepnest.net news feed (already
+// switched off in this fork). On start-up it asks GitHub for Grain-Nest's
+// latest release; if it's newer than this app and hasn't been dismissed
+// before, main.js shows it in the notification window.
+//
+// The GitHub API answers this without a login because the repository is
+// public. If it fails (offline,
+// rate-limited, no releases) nothing is shown.
+const RELEASES_API = {
+    hostname: 'api.github.com',
+    path: '/repos/UMhwoxhmE/Grain-Nest/releases/latest',
+};
+
+/** Compare "1.2.10" with "1.3.0": positive when a is newer. */
+function compareVersions(a, b) {
+    const pa = String(a).replace(/^v/i, '').split('.').map((n) => parseInt(n, 10) || 0);
+    const pb = String(b).replace(/^v/i, '').split('.').map((n) => parseInt(n, 10) || 0);
+    for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+        const d = (pa[i] || 0) - (pb[i] || 0);
+        if (d !== 0) return d;
+    }
+    return 0;
+}
+
 class NotificationService {
     constructor() {
         this.appVersion = app.getVersion();
         this.seenDataPath = path.join(app.getPath('userData'), 'seen-notifications.json');
         this.seenData = this.loadSeenData();
-        // Clean up old notifications on startup
-        this.cleanupOldNotifications();
     }
 
-    // Load data about notifications that have been seen
     loadSeenData() {
         try {
             if (fs.existsSync(this.seenDataPath)) {
                 const data = JSON.parse(fs.readFileSync(this.seenDataPath, 'utf8'));
-                
-                // Handle migration from old format (array of strings) to new format (array of objects)
-                if (Array.isArray(data.seenNotificationIds) && 
-                    data.seenNotificationIds.length > 0 && 
-                    typeof data.seenNotificationIds[0] === 'string') {
-                    
-                    // Convert old format to new format
-                    const now = new Date().toISOString();
-                    data.seenNotificationIds = data.seenNotificationIds.map(uuid => ({
-                        uuid,
-                        viewedAt: now
-                    }));
-                }
-                
-                return data;
+                return { lastSeenRelease: data.lastSeenRelease || null };
             }
         } catch (err) {
             console.error('Error loading seen notifications data:', err);
         }
-        return { lastSeenRelease: null, seenNotificationIds: [] };
+        return { lastSeenRelease: null };
     }
 
-    // Save data about seen notifications
     saveSeenData() {
         try {
             fs.writeFileSync(this.seenDataPath, JSON.stringify(this.seenData));
@@ -49,323 +57,64 @@ class NotificationService {
         }
     }
 
-    // Clean up notifications older than 90 days
-    cleanupOldNotifications() {
-        if (!this.seenData.seenNotificationIds || !Array.isArray(this.seenNotificationIds)) {
-            return;
-        }
-        
-        const ninetyDaysAgo = new Date();
-        ninetyDaysAgo.setDate(ninetyDaysAgo.getDate() - 90);
-        
-        const originalLength = this.seenData.seenNotificationIds.length;
-        
-        // Filter out notifications older than 90 days
-        this.seenData.seenNotificationIds = this.seenData.seenNotificationIds.filter(item => {
-            // Skip items without a viewedAt date (shouldn't happen with new format)
-            if (!item.viewedAt) return true;
-            
-            try {
-                const viewedDate = new Date(item.viewedAt);
-                return viewedDate > ninetyDaysAgo;
-            } catch (e) {
-                // If date parsing fails, keep the item
-                return true;
-            }
-        });
-        
-        // Save if any notifications were cleaned up
-        if (originalLength !== this.seenData.seenNotificationIds.length) {
-            console.log(`Cleaned up ${originalLength - this.seenData.seenNotificationIds.length} old notifications`);
-            this.saveSeenData();
-        }
-    }
-
-    // Get GitHub latest release
-    getLatestGithubRelease() {
+    // Grain-Nest's latest GitHub release, or a rejection (offline,
+    // rate-limited, no releases…).
+    getLatestRelease() {
         return new Promise((resolve, reject) => {
             const options = {
-                hostname: 'api.github.com',
-                path: '/repos/deepnest-next/deepnest/releases/latest',
-                headers: {
-                    'User-Agent': 'deepnest-next-app/'+this.appVersion
-                }
+                ...RELEASES_API,
+                headers: { 'User-Agent': 'grain-nest-app/' + this.appVersion },
+                timeout: 10000,
             };
-
-            https.get(options, (res) => {
+            const req = https.get(options, (res) => {
                 let data = '';
-                res.on('data', (chunk) => data += chunk);
+                res.on('data', (chunk) => (data += chunk));
                 res.on('end', () => {
-                    if (res.statusCode === 200) {
-                        try {
-                            const release = JSON.parse(data);
-                            resolve(release);
-                        } catch (err) {
-                            reject(new Error('Failed to parse GitHub response'));
-                        }
-                    } else {
-                        reject(new Error(`GitHub API responded with status code ${res.statusCode}`));
+                    if (res.statusCode !== 200) {
+                        reject(new Error(`GitHub responded with status ${res.statusCode}`));
+                        return;
+                    }
+                    try {
+                        resolve(JSON.parse(data));
+                    } catch (err) {
+                        reject(new Error('Failed to parse release JSON'));
                     }
                 });
-            }).on('error', reject);
+            });
+            req.on('timeout', () => req.destroy(new Error('Release check timed out')));
+            req.on('error', reject);
         });
     }
 
-    // Get app notifications
-    getAppNotifications() {
-        return new Promise((resolve, reject) => {
-            // Use local example file in debug mode
-            if (process.env["deepnest_debug"] === "1") {
-                try {
-                    const examplePath = path.join(__dirname, 'examples', 'app_notifications.json');
-                    if (fs.existsSync(examplePath)) {
-                        console.log('Using local notifications example file');
-                        const data = fs.readFileSync(examplePath, 'utf8');
-                        const notifications = JSON.parse(data);
-                        return resolve(notifications);
-                    } else {
-                        console.warn('Debug mode: Example notifications file not found at', examplePath);
-                    }
-                } catch (err) {
-                    console.error('Error reading local example notifications:', err);
-                }
-            }
-
-            // Regular remote fetch if not in debug mode or if local file reading failed
-            https.get('https://www.deepnest.net/app_notifications.json', (res) => {
-                let data = '';
-                res.on('data', (chunk) => data += chunk);
-                res.on('end', () => {
-                    if (res.statusCode === 200) {
-                        try {
-                            const notifications = JSON.parse(data);
-                            resolve(notifications);
-                        } catch (err) {
-                            reject(new Error('Failed to parse notifications JSON'));
-                        }
-                    } else {
-                        reject(new Error(`Notifications API responded with status code ${res.statusCode}`));
-                    }
-                });
-            }).on('error', reject);
-        });
-    }
-
-    // Check if there's a new release or important notification
+    // A notice for a newer, not-yet-dismissed release, or null.
     async checkForNotifications() {
-        try {
-            // Clean up old notifications before checking for new ones
-            this.cleanupOldNotifications();
-            
-            // Check for new release
-            const releaseInfo = await this.getLatestGithubRelease().catch(() => null);
-            const newRelease = releaseInfo && releaseInfo.tag_name !== this.seenData.lastSeenRelease && 
-                               releaseInfo.tag_name !== `v${this.appVersion}`;
-
-            // Check for new notifications
-            const notificationsResponse = await this.getAppNotifications().catch(() => ({ notifications: [] }));
-            let allNotifications = notificationsResponse.notifications || [];
-            
-            // Parse dates and sort by date (oldest first)
-            allNotifications = allNotifications
-                .map(n => ({
-                    ...n, 
-                    parsedDate: n.date ? new Date(n.date) : new Date(0)
-                }))
-                .sort((a, b) => a.parsedDate - b.parsedDate);
-            
-            // Filter to unseen notifications (checking UUID only, not date)
-            const seenUuids = this.seenData.seenNotificationIds.map(item => item.uuid);
-            const unseenNotifications = allNotifications.filter(
-                n => !seenUuids.includes(n.uuid)
-            );
-
-            // If there are unseen notifications, process them
-            if (unseenNotifications.length > 0) {
-                // Group by type
-                const importantAndUpdate = unseenNotifications.filter(n => 
-                    n.type === 'important' || n.type === 'update');
-                const otherNotifications = unseenNotifications.filter(n => 
-                    n.type !== 'important' && n.type !== 'update');
-                
-                // Handle important/update notifications
-                if (importantAndUpdate.length > 0) {
-                    // Merge multiple important/update notifications if needed
-                    if (importantAndUpdate.length > 1) {
-                        // Create a merged notification
-                        const notificationIds = importantAndUpdate.map(n => n.uuid);
-                        const title = "Multiple Important Updates";
-                        
-                        let content = "<h2>Important Updates</h2>";
-                        content += `
-                                <div class="additional-notice" style="margin-bottom: 1em;">
-                                    <p><strong>Note:</strong> Notifications sorted from old to new.</p>
-                                </div>
-                            `;
-                        importantAndUpdate.forEach(notification => {
-                            content += `
-                                <div class="merged-notification">
-                                    <h3>${notification.title}</h3>
-                                    <p class="notification-date">Date: ${new Intl.DateTimeFormat("en-US", {
-                                        dateStyle: "full",
-                                        timeStyle: "long",
-                                        timeZone: "Etc/UTC",
-                                      }).format(new Date(notification.date))}</p>
-                                    <div class="notification-content">${notification.content}</div>
-                                    <hr>
-                                </div>
-                            `;
-                        });
-                        
-                        // If there are additional notifications, add a note
-                        if (otherNotifications.length > 0) {
-                            content += `
-                                <div class="additional-notice">
-                                    <p><strong>Note:</strong> There are ${otherNotifications.length} additional notification(s) that will be shown after dismissing this one.</p>
-                                </div>
-                            `;
-                        }
-                        
-                        return {
-                            type: 'merged',
-                            data: { notifications: importantAndUpdate },
-                            title: title,
-                            content: content,
-                            markAsSeen: () => {
-                                const now = new Date().toISOString();
-                                notificationIds.forEach(id => {
-                                    this.seenData.seenNotificationIds.push({
-                                        uuid: id,
-                                        viewedAt: now
-                                    });
-                                });
-                                this.saveSeenData();
-                            }
-                        };
-                    } else {
-                        // Just one important/update notification
-                        const notification = importantAndUpdate[0];
-                        let content = notification.content;
-                        
-                        // If there are additional notifications, add a note
-                        if (otherNotifications.length > 0) {
-                            content += `
-                                <div class="additional-notice">
-                                    <p><strong>Note:</strong> There are ${otherNotifications.length} additional notification(s) that will be shown after dismissing this one.</p>
-                                </div>
-                            `;
-                        }
-                        
-                        return {
-                            type: 'notification',
-                            data: notification,
-                            title: notification.title || 'Deepnest Notification',
-                            content: content,
-                            markAsSeen: () => {
-                                this.seenData.seenNotificationIds.push({
-                                    uuid: notification.uuid,
-                                    viewedAt: new Date().toISOString()
-                                });
-                                this.saveSeenData();
-                            }
-                        };
-                    }
-                } else if (otherNotifications.length > 0) {
-                    // No important/update notifications, but other notifications exist
-                    const notification = otherNotifications[0];
-                    return {
-                        type: 'notification',
-                        data: notification,
-                        title: notification.title || 'Deepnest Notification',
-                        content: notification.content,
-                        markAsSeen: () => {
-                            this.seenData.seenNotificationIds.push({
-                                uuid: notification.uuid,
-                                viewedAt: new Date().toISOString()
-                            });
-                            this.saveSeenData();
-                        }
-                    };
-                }
-            }
-            
-            // If no unseen notifications, check for new release
-            if (newRelease) {
-                return {
-                    type: 'release',
-                    data: releaseInfo,
-                    title: `New Version Available: ${releaseInfo.tag_name}`,
-                    content: this.formatReleaseContent(releaseInfo),
-                    markAsSeen: () => {
-                        this.seenData.lastSeenRelease = releaseInfo.tag_name;
-                        this.saveSeenData();
-                    }
-                };
-            }
-            
-            return null; // No new notifications
-        } catch (err) {
-            console.error('Error checking for notifications:', err);
+        const release = await this.getLatestRelease().catch(() => null);
+        if (!release || !release.tag_name || release.draft || release.prerelease) {
             return null;
         }
-    }
+        const tag = release.tag_name;
+        if (compareVersions(tag, this.appVersion) <= 0) return null;
+        if (this.seenData.lastSeenRelease === tag) return null;
 
-    // Format release content for display
-    formatReleaseContent(release) {
-        // Format the assets section
-        let assetsHtml = '';
-        
-        if (release.assets && release.assets.length > 0) {
-            assetsHtml = `
-                <div class="release-assets">
-                    <h3>Downloads</h3>
-                    <ul class="assets-list">
-                        ${release.assets.map(asset => `
-                            <li class="asset-item">
-                                <a href="${asset.browser_download_url}" target="_blank" class="asset-link">
-                                    ${asset.name} 
-                                    <span class="asset-size">(${this.formatFileSize(asset.size)})</span>
-                                </a>
-                                <div class="asset-info">
-                                    <span class="asset-downloads">Downloaded ${asset.download_count} times</span>
-                                </div>
-                            </li>
-                        `).join('')}
-                    </ul>
-                </div>
-            `;
-        } else {
-            assetsHtml = `<p>No downloadable assets available for this release.</p>`;
-        }
+        const asset = (release.assets || []).find((a) => /macos-arm64\.(dmg|zip)$/i.test(a.name));
+        const download = asset ? asset.browser_download_url : release.html_url;
+        const content =
+            `<p>You have v${this.appVersion}.</p>` +
+            marked.parse(release.body || '') +
+            `<p><a href="${download}" target="_blank">Download ${tag}</a>` +
+            ` · <a href="${release.html_url}" target="_blank">Release page</a></p>`;
 
-        return `
-            <div class="release-info">
-                <h2>${release.name || release.tag_name}</h2>
-                <p>Published on: ${new Intl.DateTimeFormat("en-US", {
-                    dateStyle: "full",
-                    timeStyle: "long",
-                    timeZone: "Etc/UTC",
-                }).format(new Date(release.published_at))}</p>
-                
-                <div>${marked.parse(release.body) || 'No release notes available'}</div>
-                
-                ${assetsHtml}
-                
-                <p><a href="${release.html_url}" target="_blank">View on GitHub</a></p>
-            </div>
-        `;
-    }
-    
-    // Format file size to human-readable format
-    formatFileSize(bytes) {
-        if (bytes === 0) return '0 Bytes';
-        
-        const k = 1024;
-        const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB'];
-        const i = Math.floor(Math.log(bytes) / Math.log(k));
-        
-        return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+        return {
+            type: 'release',
+            title: `Grain-Nest ${tag} is out`,
+            content,
+            markAsSeen: () => {
+                this.seenData.lastSeenRelease = tag;
+                this.saveSeenData();
+            },
+        };
     }
 }
 
 module.exports = NotificationService;
+module.exports.compareVersions = compareVersions;

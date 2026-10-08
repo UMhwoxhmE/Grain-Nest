@@ -17,7 +17,13 @@ export type {
 } from "../../../index.d.ts";
 
 // Import base types for extension
-import type { DeepNestConfig, NestingResult, PolygonPoint, Part } from "../../../index.d.ts";
+import type {
+  DeepNestConfig,
+  NestingResult,
+  PolygonPoint,
+  Polygon,
+  Part,
+} from "../../../index.d.ts";
 
 /**
  * Extended configuration with UI-specific properties
@@ -37,12 +43,23 @@ export interface UIConfig extends DeepNestConfig {
   exportWithSheetsSpace: boolean;
   /** Space value between sheets in SVG units (default: 10mm) */
   exportWithSheetsSpaceValue: number;
+  /** §9.3.8: include a calibration square in every SVG export */
+  exportScalingBox: boolean;
+  /** §9.3.8: side length of the calibration square, in inches (default 4) */
+  exportScalingBoxSizeInches: number;
+  /** §9.3.9 / phase-5r: default per-piece seam allowance in mm (default 12). */
+  defaultSeamAllowanceMm?: number;
+  /** v1.3.0: default seam allowance (mm) for knit projects. */
+  defaultSeamAllowanceKnitMm?: number;
+  /** v1.3.0: saved-settings migration level (see ConfigService). */
+  settingsRevision?: number;
 }
 
 /**
  * Default configuration values
  */
-export const DEFAULT_CONVERSION_SERVER = "https://converter.deepnest.app/convert";
+export const DEFAULT_CONVERSION_SERVER =
+  "https://converter.deepnest.app/convert";
 
 /**
  * SVG Pan/Zoom instance for import view
@@ -82,14 +99,19 @@ export interface ConfigObject extends UIConfig {
    * @param key Optional key to retrieve specific value
    * @returns The value for the key, or entire config if no key provided
    */
-  getSync<K extends keyof UIConfig>(key?: K): K extends keyof UIConfig ? UIConfig[K] : UIConfig;
+  getSync<K extends keyof UIConfig>(
+    key?: K,
+  ): K extends keyof UIConfig ? UIConfig[K] : UIConfig;
 
   /**
    * Set configuration values
    * @param keyOrObject Key to set, or object with multiple values
    * @param value Value to set (when keyOrObject is a string)
    */
-  setSync<K extends keyof UIConfig>(keyOrObject: K | Partial<UIConfig>, value?: UIConfig[K]): void;
+  setSync<K extends keyof UIConfig>(
+    keyOrObject: K | Partial<UIConfig>,
+    value?: UIConfig[K],
+  ): void;
 
   /**
    * Reset all configuration to default values
@@ -129,6 +151,38 @@ export interface DeepNestInstance {
   nests: SelectableNestingResult[];
   /** Whether nesting is currently running */
   working: boolean;
+  /**
+   * §9.3.4 directional-print / nap toggle. When true, every piece's
+   * allowed-rotation set collapses to a single principal direction
+   * so a napped fabric (velvet, corduroy, directional print) doesn't
+   * end up with pieces inconsistently oriented down the bolt.
+   * Ephemeral per session; round-tripped via the .gnp project file.
+   */
+  /** v1.3.0: woven or knit project (sets the default seam allowance). */
+  fabricType: "woven" | "knit";
+  /** v1.3.0: default seam allowance (mm) for a woven or knit project. */
+  defaultSeamMm(fabricType: "woven" | "knit"): number;
+  /**
+   * v1.3.0: switch woven/knit; pieces on the old default seam move to the
+   * new one. Returns how many changed.
+   */
+  setFabricType(fabricType: "woven" | "knit"): number;
+  nap: boolean;
+  /**
+   * §9.3.10 warp direction. "horizontal" (default) means the fabric's
+   * warp runs along the bin's horizontal axis — grain-locked pieces
+   * sit grain-horizontal, length-being-bought is the horizontal
+   * extent. "vertical" rotates everything 90° and treats vertical as
+   * length. Round-tripped via the .gnp project file.
+   */
+  warpDirection: "horizontal" | "vertical";
+  /**
+   * Round 8 / phase-r8a: the last "Nest for" job picked (all, main, fused,
+   * interfacing, lining, ribbing). Only remembers the picker position — the
+   * per-piece `excluded` flags are the source of truth for what nests.
+   * Round-tripped via the .gnp project file; undefined means "all".
+   */
+  nestJob?: string;
 
   /**
    * Import an SVG file
@@ -144,7 +198,7 @@ export interface DeepNestInstance {
     dirpath: string | null,
     svgstring: string,
     scalingFactor?: number | null,
-    dxfFlag?: boolean
+    dxfFlag?: boolean,
   ): Part[];
 
   /**
@@ -161,7 +215,7 @@ export interface DeepNestInstance {
    */
   start(
     progressCallback: ((progress: NestingProgress) => void) | null,
-    displayCallback: (() => void) | null
+    displayCallback: (() => void) | null,
   ): void;
 
   /**
@@ -173,6 +227,71 @@ export interface DeepNestInstance {
    * Reset nesting state
    */
   reset(): void;
+
+  /**
+   * §9.3.2: toggle the `mirror` flag on the part at `partIndex` and
+   * mirror its polygontree + grain angle about the vertical axis
+   * through the bounding-box centre. Idempotent — calling twice
+   * un-mirrors.
+   */
+  mirrorPart(partIndex: number): void;
+
+  /**
+   * §9.3.2: create a mirrored copy of the part at `partIndex`, push
+   * onto `parts`, and return the new index (or -1 if the source part
+   * is a sheet / doesn't exist).
+   */
+  mirrorCopyPart(partIndex: number): number;
+
+  /**
+   * Phase R8-C: turn the piece end-to-end (toggle `topFlip`) so the other
+   * end of its grain line counts as the top. Returns false for sheets and
+   * pieces without a grain angle.
+   */
+  flipPartTop(partIndex: number): boolean;
+
+  /**
+   * §9.3.2 behaviour 3: "cut on the fold" — replace the part's polygon
+   * with the doubled piece (half reflected across its fold line and
+   * unioned). Returns true on success, false (unchanged) when there is
+   * no usable fold line or the union fails.
+   */
+  foldPart(partIndex: number): boolean;
+
+  /**
+   * §9.3.2 behaviour 3: undo foldPart, restoring the stored half polygon.
+   */
+  unfoldPart(partIndex: number): boolean;
+
+  /**
+   * §9.3.9: offset (inset/expand) a polygon using ClipperLib. Negative
+   * offset contracts the polygon (used to draw sew lines inset from the
+   * cut outline), positive expands it. Returns an array of polygons
+   * because a single contour can split into several when contracted.
+   */
+  polygonOffset(polygon: Polygon, offset: number): Polygon[];
+
+  /**
+   * §9.3.6: for each sheet used by the currently-selected nest,
+   * shrink its length-axis dimension down to the actual extent of
+   * placed pieces. Clears `nests` afterward (placements become
+   * advisory; user must re-run Start nest to verify). Returns the
+   * number of sheets that were trimmed.
+   */
+  trimSheetsToMinLength(): number;
+
+  /**
+   * §9.0.1 R6-A: exact bounding box of a part at a given placement —
+   * rotates the baked polygontree about the origin by the placement
+   * rotation (the placement worker's own convention), then translates by
+   * the placement x/y. Single source of truth for the min-length stat,
+   * Trim sheets, and the cut-list "length used". Returns null when the
+   * part has no usable polygon.
+   */
+  placedBounds(
+    part: Part,
+    placement: { x: number; y: number; rotation: number },
+  ): { x: number; y: number; width: number; height: number } | null;
 }
 
 /**
@@ -211,7 +330,10 @@ export interface RactiveInstance<T = unknown> {
   /** Set a value in the data context */
   set<K extends keyof T>(keypath: K, value: T[K]): Promise<void>;
   /** Register an event handler */
-  on(eventName: string, handler: (event: Event, ...args: unknown[]) => void): void;
+  on(
+    eventName: string,
+    handler: (event: Event, ...args: unknown[]) => void,
+  ): void;
 }
 
 /**
@@ -286,13 +408,20 @@ export type IpcChannel = (typeof IPC_CHANNELS)[keyof typeof IPC_CHANNELS];
  * SvgParser interface for window.SvgParser
  */
 export interface SvgParserInstance {
-  load(dirpath: string | null, svgstring: string, scale: number, scalingFactor?: number | null): SVGSVGElement;
+  load(
+    dirpath: string | null,
+    svgstring: string,
+    scale: number,
+    scalingFactor?: number | null,
+  ): SVGSVGElement;
   cleanInput(dxfFlag?: boolean): SVGSVGElement;
   polygonElements: string[];
   isClosed(element: SVGElement, tolerance: number): boolean;
   polygonify(element: SVGElement): PolygonPoint[];
   polygonifyPath(element: SVGPathElement): PolygonPoint[];
-  transformParse(transformString: string): { calc(point: PolygonPoint): PolygonPoint } | null;
+  transformParse(
+    transformString: string,
+  ): { calc(point: PolygonPoint): PolygonPoint } | null;
   applyTransform(svg: SVGSVGElement): void;
   flatten(svg: SVGSVGElement): void;
   splitLines(svg: SVGSVGElement): void;

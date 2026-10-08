@@ -34,6 +34,8 @@ const SELECTORS = {
   SHEET_WIDTH_INPUT: "#sheetwidth",
   /** Sheet height input field */
   SHEET_HEIGHT_INPUT: "#sheetheight",
+  /** §9.3.5 preset-width dropdown */
+  SHEET_PRESET_SELECT: "#sheetpreset",
 } as const;
 
 /**
@@ -203,8 +205,12 @@ export class SheetDialogService {
    * Clear the input fields and remove error states
    */
   private clearInputs(): void {
-    const widthInput = getElement<HTMLInputElement>(SELECTORS.SHEET_WIDTH_INPUT);
-    const heightInput = getElement<HTMLInputElement>(SELECTORS.SHEET_HEIGHT_INPUT);
+    const widthInput = getElement<HTMLInputElement>(
+      SELECTORS.SHEET_WIDTH_INPUT,
+    );
+    const heightInput = getElement<HTMLInputElement>(
+      SELECTORS.SHEET_HEIGHT_INPUT,
+    );
 
     if (widthInput) {
       removeClass(widthInput, CSS_CLASSES.ERROR);
@@ -214,6 +220,17 @@ export class SheetDialogService {
       removeClass(heightInput, CSS_CLASSES.ERROR);
       heightInput.value = "";
     }
+    // v1.2.0: name and fabric start blank for the next sheet.
+    const nameInput = getElement<HTMLInputElement>("#sheetname");
+    if (nameInput) nameInput.value = "";
+    const fabricSelect = getElement<HTMLSelectElement>("#sheetfabric");
+    if (fabricSelect) fabricSelect.value = "";
+    // §9.3.5: reset preset select to "(no preset)" so the next sheet
+    // add doesn't carry over a stale selection.
+    const presetSelect = getElement<HTMLSelectElement>(
+      SELECTORS.SHEET_PRESET_SELECT,
+    );
+    if (presetSelect) presetSelect.value = "";
   }
 
   /**
@@ -245,7 +262,7 @@ export class SheetDialogService {
    * @param height - Sheet height in user units (mm or inches)
    * @returns True if the sheet was added successfully
    */
-  addSheet(width: number, height: number): boolean {
+  addSheet(width: number, height: number, name = "", fabric = ""): boolean {
     if (width <= 0 || height <= 0) {
       return false;
     }
@@ -261,6 +278,9 @@ export class SheetDialogService {
     if (parts.length > 0) {
       const sheet = parts[0];
       sheet.sheet = true;
+      // v1.2.0: optional name and fabric from the Add a sheet pop-up.
+      if (name) sheet.name = name;
+      if (fabric) sheet.fabric = fabric;
     }
 
     return true;
@@ -272,8 +292,12 @@ export class SheetDialogService {
    * @returns False to prevent default behavior, undefined otherwise
    */
   handleConfirm(): boolean | undefined {
-    const widthInput = getElement<HTMLInputElement>(SELECTORS.SHEET_WIDTH_INPUT);
-    const heightInput = getElement<HTMLInputElement>(SELECTORS.SHEET_HEIGHT_INPUT);
+    const widthInput = getElement<HTMLInputElement>(
+      SELECTORS.SHEET_WIDTH_INPUT,
+    );
+    const heightInput = getElement<HTMLInputElement>(
+      SELECTORS.SHEET_HEIGHT_INPUT,
+    );
 
     if (!widthInput || !heightInput) {
       return false;
@@ -292,8 +316,10 @@ export class SheetDialogService {
     const width = Number(widthInput.value);
     const height = Number(heightInput.value);
 
-    // Add the sheet
-    const success = this.addSheet(width, height);
+    // Add the sheet (v1.2.0: with the optional name and fabric)
+    const name = getElement<HTMLInputElement>("#sheetname")?.value.trim() ?? "";
+    const fabric = getElement<HTMLSelectElement>("#sheetfabric")?.value ?? "";
+    const success = this.addSheet(width, height, name, fabric);
 
     if (success) {
       // Clear inputs and close dialog
@@ -353,7 +379,96 @@ export class SheetDialogService {
       });
     }
 
+    // §9.3.5: preset width dropdown - on change, fill the bolt-width
+    // axis input with the selected value (converted from cm to current
+    // units). Which input is the bolt-width axis depends on
+    // DeepNest.warpDirection (the keystone setting from Phase 5l).
+    const presetSelect = getElement<HTMLSelectElement>(
+      SELECTORS.SHEET_PRESET_SELECT,
+    );
+    if (presetSelect) {
+      presetSelect.addEventListener("change", () => {
+        this.handlePresetChange();
+      });
+    }
+
+    // v1.3.0: interfacing and fused are almost always 90 cm wide, so
+    // picking either fabric fills in the 90 cm preset (unless another preset
+    // is already chosen). It can still be changed for an unusual roll.
+    const fabricSelect = getElement<HTMLSelectElement>("#sheetfabric");
+    if (fabricSelect && presetSelect) {
+      fabricSelect.addEventListener("change", () => {
+        const f = fabricSelect.value;
+        if ((f === "interfacing" || f === "fused") && !presetSelect.value) {
+          presetSelect.value = "90";
+          this.handlePresetChange();
+        }
+      });
+    }
+
+    // §9.5 / phase-5z: clear the red error state as soon as the field holds a
+    // valid value. validateInput only runs on Confirm, so a field left blank
+    // goes red on submit and *stayed* red even after a good number was typed.
+    // Re-validate on input — only ever clearing the error, never flagging one
+    // mid-typing (an empty field while editing shouldn't flash red until the
+    // next Confirm).
+    [SELECTORS.SHEET_WIDTH_INPUT, SELECTORS.SHEET_HEIGHT_INPUT].forEach(
+      (selector) => {
+        const input = getElement<HTMLInputElement>(selector);
+        if (!input) return;
+        input.addEventListener("input", () => {
+          if (Number(input.value) > 0) {
+            removeClass(input, CSS_CLASSES.ERROR);
+          }
+        });
+      },
+    );
+
     this.initialized = true;
+  }
+
+  /**
+   * §9.3.5: Fill the bolt-width axis input from the selected preset.
+   * No-op when the user picks "(no preset)".
+   */
+  private handlePresetChange(): void {
+    const presetSelect = getElement<HTMLSelectElement>(
+      SELECTORS.SHEET_PRESET_SELECT,
+    );
+    if (!presetSelect || !presetSelect.value) return;
+    const cm = Number(presetSelect.value);
+    if (!Number.isFinite(cm) || cm <= 0) return;
+
+    const units = this.config.getSync("units");
+    // Preset values are stored as cm. mm → ×10; inch → ÷2.54
+    // (equivalently (cm × 10) / 25.4 — convert to mm first, then to in).
+    // Earlier this used `cm / INCHES_TO_MM` which silently divided by
+    // 25.4 directly and produced values 10× too small in inch mode
+    // (137 cm came out as 5.4 in instead of 53.94 in). Reported
+    // 2026-05-19 round-1 testing.
+    const userUnits = units === "mm" ? cm * 10 : (cm * 10) / INCHES_TO_MM;
+
+    // Pick which input is the bolt-width axis. Phase 5l semantics:
+    //   warpDirection "horizontal" → length is horizontal (#sheetwidth),
+    //     bolt-width is vertical (#sheetheight).
+    //   warpDirection "vertical"   → flipped.
+    const warpDir =
+      (this.deepNest as unknown as { warpDirection?: string }).warpDirection ??
+      "horizontal";
+    const targetId =
+      warpDir === "vertical"
+        ? SELECTORS.SHEET_WIDTH_INPUT
+        : SELECTORS.SHEET_HEIGHT_INPUT;
+    const targetInput = getElement<HTMLInputElement>(targetId);
+    if (targetInput) {
+      // Round to 1 decimal place for inches, 0 for mm — keeps the
+      // input readable without losing precision the user cares about.
+      const rounded =
+        units === "mm"
+          ? Math.round(userUnits)
+          : Math.round(userUnits * 10) / 10;
+      targetInput.value = String(rounded);
+    }
   }
 
   /**
@@ -389,7 +504,7 @@ export class SheetDialogService {
  * @returns New SheetDialogService instance
  */
 export function createSheetDialogService(
-  options: SheetDialogOptions
+  options: SheetDialogOptions,
 ): SheetDialogService {
   return SheetDialogService.create(options);
 }
@@ -423,7 +538,7 @@ export function initializeSheetDialog(
   deepNest: DeepNestInstance,
   config: ConfigObject,
   ractive?: RactiveInstance<PartsViewData>,
-  resizeCallback?: ResizeCallback
+  resizeCallback?: ResizeCallback,
 ): SheetDialogService {
   const service = new SheetDialogService({
     deepNest,

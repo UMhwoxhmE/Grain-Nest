@@ -1,0 +1,10 @@
+* text=auto
+
+# Shell scripts and the macOS launcher must use LF line endings — CRLF
+# breaks them on Unix-like systems.
+*.command text eol=lf
+*.sh      text eol=lf
+
+# Husky's hook scripts are sourced by sh — must stay LF on every
+# platform or `git commit` errors with "Exec format error".
+.husky/*  text eol=lf

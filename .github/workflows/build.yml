@@ -1,44 +1,60 @@
 name: build
 
+# Builds the Mac app (Grain-Nest.app, Apple Silicon / arm64) and keeps it as a
+# downloadable .dmg on the run's summary page. v1.3.0: a disk image rather
+# than a zip — opening it shows Grain-Nest next to an Applications shortcut,
+# and dragging one onto the other always offers to Replace (a zip unpacked
+# next to an older copy became "Grain-Nest 2.app").
+#
+# This deliberately does NOT run on every push or pull request (the repo was
+# private until v1.3.0, when macOS minutes cost 10x Linux ones; it's public
+# now, but a Mac app is only needed for a release). It runs when started by
+# hand (Actions tab → build → Run workflow) and when a release is published
+# (build_release.yml calls it). Every change is still checked automatically
+# on Linux by playwright.yml, which compiles the code and runs the app's
+# tests.
+
 on:
   workflow_dispatch:
-  push:
-    # enable next line to limit branches to run
-    branches: ["main"]
-  pull_request:
-    # enable next line to limit branches to run
-    # branches: [ "main" ]
+  workflow_call:
 
 jobs:
-  build:
-    strategy:
-      matrix:
-        node-version: [20.x, 22.x]
-        os: [windows-2022, ubuntu-22.04]
-    runs-on: ${{ matrix.os }}
+  build-macos:
+    runs-on: macos-latest # Apple Silicon (arm64)
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
-        with:
-          submodules: recursive
 
-      #    not needed currently, but leaving here for future use
-      #    - uses: actions/setup-python@v4
-      #      with:
-      #        python-version: '2.7.18'
-
-      - name: boost
-        if: startsWith(matrix.os,'ubuntu')
-        run: sudo apt-get update && sudo apt-get install -yq libboost-dev
-
-      - name: Use Node.js ${{ matrix.node-version }}
+      - name: Use Node.js 22
         uses: actions/setup-node@v4
         with:
-          node-version: ${{ matrix.node-version }}
+          node-version: 22.x
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
 
       - name: Build
+        run: npm run build
+
+      - name: Package Grain-Nest.app
+        run: npm run dist
+
+      - name: Make the disk image (.dmg)
+        # The window shows Grain-Nest.app and an Applications shortcut to
+        # drag it onto. ditto copies the app with its symlinks and signature
+        # intact.
         run: |
-          npm install
-          npm run build
-      - name: Package
-        run: |
-          npm run dist
+          VERSION=$(node -p "require('./package.json').version")
+          DMG="grain-nest-v${VERSION}-macos-arm64.dmg"
+          mkdir -p dmg
+          ditto out/Grain-Nest-darwin-arm64/Grain-Nest.app dmg/Grain-Nest.app
+          ln -s /Applications dmg/Applications
+          hdiutil create -volname "Grain-Nest ${VERSION}" -srcfolder dmg -ov -format UDZO "$DMG"
+          echo "DMG=$DMG" >> "$GITHUB_ENV"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: grain-nest-macos-arm64
+          path: ${{ env.DMG }}
+          retention-days: 14

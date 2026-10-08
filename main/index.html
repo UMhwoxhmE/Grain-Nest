@@ -1,7 +1,7 @@
 <!doctype html>
 <html itemscope="" itemtype="http://schema.org/WebPage" lang="en">
   <head>
-    <title>deepnest - Industrial nesting</title>
+    <title>Grain-Nest — pattern nesting with grain direction</title>
 
     <link
       type="text/css"
@@ -21,14 +21,77 @@
     <script src="util/simplify.js"></script>
 
     <script type="module">
-      import { SvgParser } from "./svgparser.js";
-      window.SvgParser = new SvgParser();
-      import { DeepNest, GeneticAlgorithm } from "./deepnest.js";
-      window.DeepNest = new DeepNest(require("electron").ipcRenderer);
+      // Boot-time diagnostics. The original boot was three lines that
+      // could throw silently on platforms where require("electron")
+      // behaves differently (round-2 Mac testing 2026-05-19 hit this
+      // — UI partially rendered, post-MVP buttons all dead, no
+      // console error). Wrap each step so failures show as a visible
+      // banner instead of an apparently-working app.
+      //
+      // Static imports can't be in try/catch (they run at parse time)
+      // so each module is dynamic-imported in sequence. Functionally
+      // identical to the static version on success.
+      (async function bootGrainNest() {
+        const log = (...a) => console.log("[grainnest:boot]", ...a);
+        const showBootError = (step, err) => {
+          console.error("[grainnest:boot]", step, "FAILED:", err);
+          const banner = document.createElement("div");
+          banner.id = "grainnest-boot-error";
+          banner.style.cssText =
+            "position:fixed;top:0;left:0;right:0;z-index:2147483647;" +
+            "background:#b00020;color:#fff;padding:14px 22px;" +
+            "font-family:-apple-system,system-ui,sans-serif;font-size:13px;" +
+            "line-height:1.45;box-shadow:0 2px 12px rgba(0,0,0,0.45);" +
+            "white-space:pre-wrap";
+          const errText = (err && (err.stack || err.message)) || String(err);
+          const safe = errText.replace(/&/g, "&amp;").replace(/</g, "&lt;");
+          banner.innerHTML =
+            "<strong>Grain-Nest boot failure at step: " +
+            step +
+            "</strong>\n" +
+            '<span style="font-size:12px;opacity:0.9">Please copy this text ' +
+            "when reporting the problem. (DevTools: Cmd+Option+I → Console for the full trace.)" +
+            "</span>\n\n" +
+            safe.slice(0, 1500);
+          (document.body || document.documentElement).appendChild(banner);
+        };
 
-      // Modular TypeScript entry point (replaces legacy page.js)
-      const modulePath = new URL("../build/ui/index.js", import.meta.url).href;
-      const ui = await import(modulePath);
+        try {
+          log("step 1/3: import SvgParser");
+          const { SvgParser } = await import("./svgparser.js");
+          window.SvgParser = new SvgParser();
+          log("step 1/3: ok");
+        } catch (e) {
+          showBootError("1/3 SvgParser import", e);
+          return;
+        }
+
+        try {
+          log("step 2/3: import DeepNest + require('electron').ipcRenderer");
+          const { DeepNest } = await import("./deepnest.js");
+          // The require call here is the single most fragile line in the
+          // boot path on macOS — Electron 40 patch versions have shifted
+          // how require() resolves from inside ES module scripts. If this
+          // throws, the banner above tells us so unambiguously.
+          const electronMod = require("electron");
+          window.DeepNest = new DeepNest(electronMod.ipcRenderer);
+          log("step 2/3: ok");
+        } catch (e) {
+          showBootError("2/3 DeepNest + electron.ipcRenderer", e);
+          return;
+        }
+
+        try {
+          log("step 3/3: dynamic import of build/ui/index.js");
+          const modulePath = new URL("../build/ui/index.js", import.meta.url)
+            .href;
+          await import(modulePath);
+          log("step 3/3: ok — boot complete");
+        } catch (e) {
+          showBootError("3/3 build/ui/index.js dynamic import", e);
+          return;
+        }
+      })();
     </script>
   </head>
 
@@ -36,12 +99,12 @@
     <div id="nest">
       <ul class="topnav">
         <li class="button stop" id="stopnest">Stop nest</li>
+        <li class="button" id="trimsheets">Trim sheets</li>
         <span id="export_wrapper">
           <li class="button export disabled" id="export">Export</li>
           <ul class="dropdown">
             <li id="exportsvg">SVG file</li>
-            <li id="exportdxf">DXF file</li>
-            <li id="exportjson">JSON file</li>
+            <li id="exportcutlist">Cut list (text)</li>
             <!--<li id="exportgcode">GCode file</li>-->
           </ul>
         </span>
@@ -96,16 +159,17 @@
         	<div class="group"><h1>{{ getSelected().length > 0 ? getSelected()[0].placements.length : '-' }}</h1><span class="label">{{ getSelected().length > 0 ? (getSelected()[0].placements.length > 1 ? 'sheets used' : 'sheet used') : '' }}</span></div>
         	<div class="group"><h1>{{ getPartsPlaced() }}</h1><span class="label">parts placed</span></div>
         	<div class="group"><h1>{{ getUtilisation() }}%</h1><span class="label">sheet utilisation</span></div>
-        	<div class="group"><h1>{{ getTimeSaved() }}</h1><span class="label">laser time saved</span></div>
+        	<div class="group"><h1>{{ getMinLength() }}</h1><span class="label">min fabric length</span></div>
         	<div class="group"><h1>best nests so far</h1></div>
         	<div id="nestlist">
-        		{{#each nests:i}}
+        		{{#each getNestsByFabric():i}}
         		<span class="nest {{ selected ? "active" : "" }}" on-click="selectnest:{{this}}">
         			<span class="nest_inner">
         			{{#each getNestedPartSources(this)}}
         			<i style="background-color: {{ getColorBySource(this) }}"></i>
         			{{/each}}
         			</span>
+        			<span class="nest_length">{{ getNestLength(this) }}</span>
         		</span>
         		{{/each}}
         	</div>
@@ -118,6 +182,11 @@
         <a href="#" class="button close"></a>
         <div id="messagecontent"></div>
       </div>
+    </div>
+
+    <div id="grainmarker-banner">
+      <span id="grainmarker-text"></span>
+      <a href="#" class="button" id="grainmarker-cancel">Cancel</a>
     </div>
 
     <div id="main" class="active">
@@ -136,41 +205,147 @@
           <ul class="topnav">
           	<li class="button import" id="import">Import</li>
           	<li class="button start {{ getSheets().length == 0 ? "disabled" : "" }}" id="startnest">Start nest</li>
+          	<li class="button" id="openproject">Open project</li>
+          	<li class="button" id="saveproject">Save project</li>
+          	<li class="button" id="clearall">Clear all</li>
+          	<li class="topnav-checkbox">
+          		<label><input type="checkbox" id="napcheckbox" /> Nap (directional)</label>
+          	</li>
+          	<li class="topnav-checkbox">
+          		<label title="Woven or knit project: sets the default seam allowance for its pieces (Settings → Seam allowance)">
+          			<select id="fabrictype">
+          				<option value="woven">Woven</option>
+          				<option value="knit">Knit</option>
+          			</select>
+          		</label>
+          	</li>
+          	<li class="topnav-checkbox">
+          		<label>Nest for
+          			<select id="nestjob" value="{{nestJob}}" on-change="nestjob" title="Include only the pieces for one fabric, from the cut codes in their names (C2M, C1L, C2I, C1R…)">
+          				{{#each nestJobs}}<option value="{{id}}">{{label}}</option>{{/each}}
+          			</select>
+          		</label>
+          	</li>
+          	<li class="button" id="toggleexcluded" on-click="toggleexcluded">{{ showExcluded ? "Hide" : "Show" }} excluded ({{ excludedCount(parts) }})</li>
           </ul>
 
           <div id="parts" class="parts-drag">
 
           	<div id="partscroll">
-          		<table>
+          		<table id="partslist">
+          			<colgroup>
+          				<col /><col /><col /><col /><col /><col /><col /><col /><col />
+          			</colgroup>
           			<thead>
           				<tr>
+          					<th title="Ticked pieces go into the next nest"><span>Nest</span></th>
           					<th><span></span></th>
+          					<th><span>Name</span></th>
           					<th data-sort-field="area"><span>Size</span></th>
           					<th data-sort-field="sheet"><span>Sheet</span></th>
           					<th data-sort-field="quantity"><span>Quantity</span></th>
+          					<th><span>Seam (mm)</span></th>
+          					<th data-sort-field="grainRule" title="Grain rule for pieces; Fabric for sheets"><span>Grain rule / Fabric</span></th>
+          					<th><span>Actions</span></th>
           				</tr>
           			</thead>
           			<tbody>
           				{{#each parts:i}}
-          					<tr on-mouseenter-mousedown="selecthandler:{{this}}" class='{{ selected ? "active" : "" }}'>
-          						<td>{{{ partrenderer(this) }}} <span style="display: none">{{bounds.width}}</span></td>
+          					{{#if showExcluded || sheet || !excluded}}
+          					<tr on-mouseenter-mousedown="selecthandler:{{this}}" class='{{ selected ? "active" : "" }}{{ excluded ? " excluded" : "" }}'>
+          						<td><input type="checkbox" class="includetoggle" checked="{{ !excluded }}" on-change="includetoggle:{{i}}" title="{{ sheet ? 'Use this sheet in the nest' : 'Include this piece in the nest' }}" /></td>
+          						<td><span class="partthumb" data-index="{{i}}"></span> <span style="display: none">{{bounds.width}}</span></td>
+          						<td><input type="text" class="partname" value="{{name}}" placeholder="{{ sheet ? 'Sheet name' : filename }}" /></td>
           						<td><dimensionLabel/></td>
           						<td><input type="checkbox" checked='{{sheet}}' /></td>
           						<td><input type="number" min="1" step="1" value="{{quantity}}" /></td>
+          						<td>{{#if !sheet}}<input type="number" class="seamallowance" min="0" step="0.5" value="{{seamAllowance}}" placeholder="0" />{{/if}}</td>
+          						<td>
+          							{{#if sheet}}
+          							<select class="sheetfabric" value="{{fabric}}" title="Which fabric this sheet is — &quot;Nest for&quot; ticks the sheets set to its fabric">
+          								{{#each sheetFabrics}}<option value="{{id}}">{{label}}</option>{{/each}}
+          							</select>
+          							{{else}}
+          							<select value='{{grainRule}}'>
+          								<option value="free">Free</option>
+          								<option value="lock">Lock to grain</option>
+          								<option value="flipped">Grain or flipped</option>
+          								<option value="bias">Bias</option>
+          								<option value="custom">Custom tolerance</option>
+          							</select>
+          							{{/if}}
+          							{{#if (grainSource === 'manual-required' || grainSource === 'manual') && !sheet}}
+          								<a href="#" class="markgrain" on-click="markgrain:{{this}}">{{ grainSource === 'manual' ? 'Re-mark' : 'Mark grain' }}</a>
+          							{{/if}}
+          						</td>
+          						<td class="rowactions">
+          							{{#if !sheet && typeof grainAngle === "number"}}
+          								<a href="#" class="mirror fliptop" on-click="fliptop:{{this}}" title="Turn the piece end-to-end: the arrow in the picture shows its top, which goes to the start (left) of the fabric">Flip top</a>
+          							{{/if}}
+          							{{#if !sheet}}
+          								<a href="#" class="mirror" on-click="mirrortoggle:{{this}}">{{ mirror ? 'Unmirror' : 'Mirror' }}</a>
+          								<a href="#" class="mirror" on-click="mirrorcopy:{{this}}">Mirror copy</a>
+          								<a href="#" class="mirror" on-click="foldtoggle:{{this}}">{{ cutOnFold ? 'Unfold' : 'Cut on fold' }}</a>
+          							{{/if}}
+          						</td>
           					</tr>
+          					{{/if}}
           				{{/each}}
           			</tbody>
           		</table>
           	</div>
 
           	<div id="partstools">
-                  <div>
-          		<a href="#" class="button addsheet" id="addsheet">&nbsp;</a>
-          		<a href="#" class='button delete {{ getSelected().length == 0 ? "disabled" : "" }}' on-click="delete">&nbsp;</a>
-          		<a href="#" class="button {{ parts.length == 0 ? "disabled" : "" }}" id="selectall" on-click="selectall">{{ getSelected().length == parts.length ? 'Deselect' : 'Select' }} all</a>
+                  <!-- v1.1.1: one compact toolbar (wraps on a narrow panel). -->
+                  <div id="partstoolsgrid">
+                    <div class="pt-group">
+                      <a href="#" class="button addsheet" id="addsheet" title="Add a sheet (a piece of fabric to nest on)">&nbsp;</a>
+                      <a href="#" class='button delete {{ getSelected().length == 0 ? "disabled" : "" }}' on-click="delete" title="Delete the selected rows">&nbsp;</a>
+                      <a href="#" class="button {{ parts.length == 0 ? "disabled" : "" }}" id="selectall" on-click="selectall">{{ getSelected().length == parts.length ? 'Deselect' : 'Select' }} all</a>
+                    </div>
+                    <div class="pt-group">
+                      <span class="bulkactions-label">Apply to selected:</span>
+                      <select id="bulkgrainrule" on-change="bulkgrainrule">
+                        <option value="">Grain rule…</option>
+                        <option value="free">Free</option>
+                        <option value="lock">Lock to grain</option>
+                        <option value="flipped">Grain or flipped</option>
+                        <option value="bias">Bias</option>
+                        <option value="custom">Custom tolerance</option>
+                      </select>
+                      <a href="#" class="button bulkfliptop" on-click="bulkfliptop" title="Turn the selected pieces end-to-end (top becomes bottom)">Flip top</a>
+                      <a href="#" class="button" on-click="bulkmirror">Mirror</a>
+                      <a href="#" class="button" on-click="bulkunmirror">Unmirror</a>
+                      <a href="#" class="button" on-click="bulkinclude" title="Tick the selected pieces into the next nest">Include</a>
+                      <a href="#" class="button" on-click="bulkexclude" title="Leave the selected pieces out of the next nest (they stay in the list)">Exclude</a>
+                    </div>
+                    <div class="pt-group">
+                      <input type="number" id="bulkquantity" min="1" step="1" placeholder="Qty" />
+                      <a href="#" class="button" on-click="bulksetquantity">Set qty</a>
+                      <input type="number" id="bulkseam" min="0" step="0.5" placeholder="Seam mm" />
+                      <a href="#" class="button" on-click="bulksetseam">Set seam</a>
+                    </div>
+                    <a href="#" class="resetlayout" id="resetlayout" on-click="resetlayout" title="Forget the saved panel and column widths and go back to the original layout">Reset layout</a>
                   </div>
           		<div id="sheetdialog">
-          		<h2>Add Sheet</h2>
+          		<h2>Add a sheet</h2>
+          		<span class="row"><span class="label">Name</span> <input type="text" id="sheetname" placeholder="e.g. Navy twill" /></span>
+          		<span class="row"><span class="label">Fabric</span>
+          			<select id="sheetfabric">
+          				{{#each sheetFabrics}}<option value="{{id}}">{{label}}</option>{{/each}}
+          			</select>
+          		</span>
+          		<span class="row"><span class="label">Preset width</span>
+          			<select id="sheetpreset">
+          				<option value="">(no preset)</option>
+          				<option value="90">35 in (90 cm) — interfacing / fused</option>
+          				<option value="109">43 in (109 cm)</option>
+          				<option value="137">54 in (137 cm)</option>
+          				<option value="147">58 in (147 cm)</option>
+          				<option value="157">62 in (157 cm)</option>
+          				<option value="177">70 in (177 cm)</option>
+          			</select>
+          		</span>
           		<span class="row"><span class="label">width</span> <input type="number" min="0" id="sheetwidth" required /> {{ getUnits }}</span>
           		<span class="row"><span class="label">height</span> <input type="number" min="0" id="sheetheight" required /> {{ getUnits }}</span>
                   <div>
@@ -210,8 +385,9 @@
 
       <div id="config" class="page">
         <form id="configform">
-          <h1>Nesting configuration</h1>
-
+          <!-- v1.3.0 (settings review): Deepnest leftovers that
+               aren't for dressmaking removed; technical ones under "Advanced". -->
+          <h1>Nesting</h1>
           <dl class="formgroup">
             <dt>Display units</dt>
             <dd>
@@ -226,8 +402,7 @@
               <input type="radio" name="units" value="mm" data-config="units" />
               <span class="radiolabel">mm</span>
             </dd>
-
-            <dt>Space between parts</dt>
+            <dt>Space between pieces</dt>
             <dd>
               <input
                 type="number"
@@ -240,128 +415,52 @@
               />
               <i><span class="unit-label">inch</span></i>
             </dd>
-
-            <dt>Curve tolerance</dt>
-            <dd>
-              <input
-                type="number"
-                value="0.3"
-                min="0"
-                step="any"
-                data-config="curveTolerance"
-                data-conversion="true"
-                required
-              />
-              <i><span class="unit-label">inch</span></i>
-            </dd>
-
-            <dt>Part rotations</dt>
-            <dd>
-              <input
-                type="number"
-                value="4"
-                step="1"
-                min="1"
-                max="32"
-                data-config="rotations"
-                required
-              />
-            </dd>
-
-            <dt>Optimization type</dt>
+            <dt>Packing style</dt>
             <dd>
               <select name="placementType" data-config="placementType">
-                <option value="gravity" default>Gravity</option>
-                <option value="box">Bounding Box</option>
-                <option value="convexhull">Squeeze</option>
+                <option value="gravity" default>
+                  Gravity — push pieces towards one end (least fabric length)
+                </option>
+                <option value="box">
+                  Bounding box — keep the layout as compact a rectangle as
+                  possible
+                </option>
+                <option value="convexhull">
+                  Squeeze — pack pieces into each other's outlines
+                </option>
               </select>
-            </dd>
-
-            <dt>Use rough approximation</dt>
-            <dd>
-              <input type="checkbox" data-config="simplify" />
-            </dd>
-
-            <dt>CPU cores</dt>
-            <dd>
-              <input
-                type="number"
-                value="4"
-                step="1"
-                min="1"
-                max="8"
-                data-config="threads"
-                required
-              />
             </dd>
           </dl>
-
-          <h1>Import/Export</h1>
+          <h1>Seam allowance</h1>
           <dl class="formgroup">
-            <dt>
-              Use SVG Normalizer?<small><br \ />since v1.3.0</small>
-            </dt>
-            <dd>
-              <input
-                id="useSvgPreProcessor"
-                type="checkbox"
-                data-config="useSvgPreProcessor"
-              />
-            </dd>
-
-            <dt>SVG scale</dt>
-            <dd>
-              <input
-                id="inputscale"
-                type="number"
-                value="72"
-                min="1"
-                step="any"
-                data-config="scale"
-                required
-              />
-              <i>units/<span class="unit-label">inch</span></i>
-            </dd>
-
-            <dt>Endpoint tolerance</dt>
+            <dt>Default for wovens</dt>
             <dd>
               <input
                 type="number"
-                value="0.3"
+                value="12"
                 min="0"
-                step="any"
-                data-config="endpointTolerance"
-                data-conversion="true"
+                step="0.5"
+                data-config="defaultSeamAllowanceMm"
                 required
               />
-              <i><span class="unit-label">inch</span></i>
+              <i>mm</i>
             </dd>
-
-            <dt>DXF import units</dt>
+            <dt>Default for knits</dt>
             <dd>
-              <select name="dxfImportScale" data-config="dxfImportScale">
-                <option value="1" default>Points</option>
-                <option value="12">Picas</option>
-                <option value="72">Inches</option>
-                <option value="2.83465">mm</option>
-                <option value="28.3465">cm</option>
-              </select>
+              <input
+                type="number"
+                value="10"
+                min="0"
+                step="0.5"
+                data-config="defaultSeamAllowanceKnitMm"
+                required
+              />
+              <i>mm</i>
             </dd>
-
-            <dt>DXF export units</dt>
-            <dd>
-              <select name="dxfExportScale" data-config="dxfExportScale">
-                <option value="72" default>Points</option>
-                <option value="6">Picas</option>
-                <option value="1">Inches</option>
-                <option value="25.4">mm</option>
-                <option value="2.54">cm</option>
-              </select>
-            </dd>
-
-            <dt>
-              Export with Sheet Boundborders?<small><br \ />since v1.3.1</small>
-            </dt>
+          </dl>
+          <h1>Export</h1>
+          <dl class="formgroup">
+            <dt>Draw the sheet border</dt>
             <dd>
               <input
                 id="exportWithSheetBoundboarders"
@@ -369,24 +468,13 @@
                 data-config="exportWithSheetBoundboarders"
               />
             </dd>
-
-            <dt>
-              Export with Space between Sheets?<small
-                ><br \ />since v1.3.1</small
-              >
-            </dt>
+            <dt>Gap between sheets</dt>
             <dd>
               <input
                 id="exportWithSheetsSpace"
                 type="checkbox"
                 data-config="exportWithSheetsSpace"
               />
-            </dd>
-
-            <dt>
-              Distance between Sheets?<small><br \ />since v1.3.1</small>
-            </dt>
-            <dd>
               <input
                 id="exportWithSheetsSpaceValue"
                 type="number"
@@ -395,112 +483,110 @@
                 max="100"
                 step="any"
                 data-config="exportWithSheetsSpaceValue"
-                data-conversion="true"
+                data-conversion="inch"
+                required
+              />
+              <i><span class="unit-label">inch</span></i>
+            </dd>
+            <dt>Calibration square</dt>
+            <dd>
+              <input
+                id="exportScalingBox"
+                type="checkbox"
+                data-config="exportScalingBox"
+              />
+              <input
+                id="exportScalingBoxSize"
+                type="number"
+                value="4"
+                min="0.5"
+                step="any"
+                data-config="exportScalingBoxSizeInches"
+                data-conversion="inch"
                 required
               />
               <i><span class="unit-label">inch</span></i>
             </dd>
           </dl>
-
-          <h1>Laser options</h1>
-          <dl class="formgroup">
-            <dt>Merge common lines</dt>
-            <dd>
-              <input
-                type="checkbox"
-                checked="checked"
-                data-config="mergeLines"
-              />
-            </dd>
-
-            <dt>Optimization ratio</dt>
-            <dd>
-              <input
-                type="number"
-                value="0.5"
-                min="0"
-                max="1"
-                step="any"
-                data-config="timeRatio"
-                required
-              />
-            </dd>
-          </dl>
-
-          <h1>Meta-heuristic fine tuning</h1>
-          <dl class="formgroup">
-            <dt>GA population</dt>
-            <dd>
-              <input
-                type="number"
-                value="10"
-                step="1"
-                min="3"
-                data-config="populationSize"
-                required
-              />
-            </dd>
-
-            <dt>GA mutation rate</dt>
-            <dd>
-              <input
-                type="number"
-                value="10"
-                step="1"
-                min="1"
-                max="512"
-                data-config="mutationRate"
-                required
-              />
-            </dd>
-          </dl>
-
-          <h1>Other Settings</h1>
-          <dl class="formgroup">
-            <dt>
-              Use Quantity from filename (demosvg.{quantity:3}.svg =
-              demosvg.3.svg)<small><br \ />since v1.3.0</small>
-            </dt>
-            <dd>
-              <input type="checkbox" data-config="useQuantityFromFileName" />
-            </dd>
-          </dl>
-
-          <h1>Presets</h1>
-          <dl class="formgroup">
-            <dt>Save Configuration Presets</dt>
-            <dd id="presets-container">
-              <button id="savePresetBtn" class="button">Save Preset</button>
-            </dd>
-            <dt>Load/Delete Configuration Presets</dt>
-            <dd id="presets-container">
-              <div>
-                <select id="presetSelect">
-                  <option value="">-- Select a preset --</option>
-                </select>
-                <br />
-                <button id="loadPresetBtn" class="button">Load</button>
-                <button id="deletePresetBtn" class="button">Delete</button>
-              </div>
-            </dd>
-          </dl>
-
-          <!-- Save preset modal dialog -->
-          <div id="preset-modal" class="modal">
-            <div class="modal-content">
-              <span class="close">&times;</span>
-              <h2>Save Preset</h2>
-              <input
-                type="text"
-                id="presetName"
-                style="width: max-content"
-                placeholder="Enter preset name"
-              />
-              <br />
-              <button id="confirmSavePreset" class="button save">Save</button>
-            </div>
-          </div>
-
+          <details class="advanced">
+            <summary>Advanced</summary>
+            <dl class="formgroup">
+              <dt>Curve tolerance</dt>
+              <dd>
+                <input
+                  type="number"
+                  value="0.3"
+                  min="0"
+                  step="any"
+                  data-config="curveTolerance"
+                  data-conversion="true"
+                  required
+                />
+                <i><span class="unit-label">inch</span></i>
+              </dd>
+              <dt>Rotations for Free pieces</dt>
+              <dd>
+                <input
+                  type="number"
+                  value="4"
+                  step="1"
+                  min="1"
+                  max="32"
+                  data-config="rotations"
+                  required
+                />
+              </dd>
+              <dt>SVG scale (files without units)</dt>
+              <dd>
+                <input
+                  id="inputscale"
+                  type="number"
+                  value="72"
+                  min="1"
+                  step="any"
+                  data-config="scale"
+                  required
+                />
+                <i>units/<span class="unit-label">inch</span></i>
+              </dd>
+              <dt>Endpoint tolerance</dt>
+              <dd>
+                <input
+                  type="number"
+                  value="0.3"
+                  min="0"
+                  step="any"
+                  data-config="endpointTolerance"
+                  data-conversion="true"
+                  required
+                />
+                <i><span class="unit-label">inch</span></i>
+              </dd>
+              <dt>Search: layouts per round</dt>
+              <dd>
+                <input
+                  type="number"
+                  value="10"
+                  step="1"
+                  min="3"
+                  data-config="populationSize"
+                  required
+                />
+              </dd>
+              <dt>Search: variation rate</dt>
+              <dd>
+                <input
+                  type="number"
+                  value="10"
+                  step="1"
+                  min="1"
+                  max="512"
+                  data-config="mutationRate"
+                  required
+                />
+              </dd>
+            </dl>
+          </details>
           <div style="padding: 0 0 5em 0">
             <a href="#" id="setdefault">set all to default</a>
           </div>
@@ -1059,251 +1145,6 @@
           Real-world vectors are often messy and imprecise, sometimes the points
           from one path to the next does not match up exactly to form a closed
           path. Try increasing this value if you have trouble importing a file.
-        </div>
-
-        <div class="config_explain" id="explain_simplify">
-          <svg
-            version="1.1"
-            xmlns="http://www.w3.org/2000/svg"
-            xmlns:xlink="http://www.w3.org/1999/xlink"
-            x="0px"
-            y="0px"
-            width="571.58px"
-            height="287.63px"
-            viewBox="0 0 571.58 287.63"
-            enable-background="new 0 0 571.58 287.63"
-            xml:space="preserve"
-          >
-            <path
-              fill="none"
-              stroke="#B5BCC9"
-              stroke-width="2"
-              stroke-miterlimit="10"
-              d="M244.95,128.54
-	c-2.267-4.825-6.577-8.373-11.39-10.493c-2.816-1.24-5.831-2.039-8.889-2.381c-2.4-0.269-5.51,0.34-6.476-2.54l-0.008-0.025
-	c-1.647-6.587-7.741-11.507-13.772-13.932l-7.167-2.895c-0.008,0-0.008,0-0.008,0c-2.205-0.892-2.17-3.281-0.177-4.434l6.655-3.845
-	c0.328-0.193,0.74-0.227,1.103-0.075l30.868,12.435l2.112-5.233l-22.707-9.154c-2.104-0.85-2.448-3.122-0.387-4.324l8.506-4.913
-	c0.337-0.194,0.749-0.219,1.101-0.075l14.168,5.703l2.112-5.233l-13.049-5.259c-0.539-0.21-0.858-0.773-0.782-1.345l1.969-13.934
-	l-5.587-0.781l-2.136,15.118c-0.05,0.387-0.278,0.725-0.615,0.917l-8.514,4.922c-2.012,1.144-3.879-0.177-3.551-2.499l3.424-24.247
-	l-5.586-0.791l-4.652,32.963c-0.059,0.387-0.286,0.723-0.623,0.917l-6.655,3.844c-1.944,1.103-4.064,0.06-3.761-2.313l0.008-0.059
-	l1.086-7.665c0.731-5.215,0.151-10.677-2.516-15.286h-0.009c-0.739-1.296-1.564-2.39-2.389-3.307h-0.008
-	c-0.084-0.102-0.177-0.201-0.27-0.295l-0.017-0.025c-1.043-1.161-1.178-2.6-0.438-3.97h0.009c4.715-7.853,5.889-19.09,0.446-26.897
-	l-0.757-1.085l-1.32-0.109c-5.505-0.51-10.839,1.631-15.118,4.983c-2.224,1.742-4.198,3.794-5.932,6.021
-	c-1.491,1.914-2.702,5.056-5.663,4.451l-0.033-0.009c-0.134-0.034-0.269-0.06-0.396-0.093c-1.204-0.252-2.558-0.422-4.046-0.422
-	h-0.008h-0.017c-5.326,0-10.34,2.23-14.487,5.469l-6.092,4.77c-1.791,1.792-3.919-0.025-3.936-2.06v-7.69
-	c0-0.387,0.185-0.75,0.488-0.994l26.216-20.51l-3.483-4.442L132.508,30.51c-1.809,1.405-3.911,0.53-3.937-1.835V18.85
-	c0-0.388,0.185-0.757,0.488-0.993l12.031-9.415L137.607,4l-11.08,8.666c-0.455,0.361-1.094,0.361-1.548,0L113.899,4l-3.482,4.443
-	l12.03,9.415c0.304,0.235,0.488,0.606,0.488,0.993v9.825c-0.008,2.381-2.154,3.214-3.938,1.835v-0.009L99.713,15.417l-3.482,4.442
-	l26.214,20.51c0.304,0.244,0.488,0.606,0.488,0.994v7.69c-0.01,2.207-2.116,3.454-3.938,2.06l-6.091-4.77
-	c-4.147-3.239-9.163-5.469-14.488-5.469h-0.009h-0.017c-1.49,0-2.844,0.17-4.038,0.422h-0.009c-0.126,0.033-0.261,0.059-0.395,0.093
-	l-0.026,0.009c-2.804,0.526-3.842-2.03-5.251-3.904c-1.706-2.269-3.654-4.371-5.852-6.172c-4.39-3.597-9.867-5.892-15.616-5.38
-	l0.008-0.008l-1.396,0.143l-0.808,1.136c-3.103,4.459-3.981,10.059-3.343,15.374c0.327,2.718,1.034,5.39,2.07,7.923
-	c0.953,2.33,3.484,5.176,1.323,7.562l-0.016,0.025c-4.762,5.09-6.125,12.148-5.166,18.896l1.093,7.665v0.042
-	c0.32,2.38-1.825,3.433-3.752,2.331l-6.663-3.837c-0.329-0.194-0.564-0.53-0.614-0.908L45.247,49.33l-5.587,0.79l3.458,24.246
-	c0.31,2.28-1.54,3.643-3.56,2.49l-8.513-4.904c-0.337-0.194-0.564-0.53-0.614-0.908l-2.153-15.127l-5.587,0.8l1.977,13.923
-	c0.084,0.572-0.235,1.136-0.773,1.346L10.854,77.26l2.112,5.233l14.159-5.729c0.362-0.143,0.773-0.108,1.102,0.084l8.515,4.905
-	c2.052,1.186,1.758,3.441-0.371,4.323h-0.009l-22.699,9.171l2.12,5.233l30.859-12.478c0.354-0.142,0.766-0.107,1.102,0.085
-	l6.655,3.836c1.978,1.145,2.037,3.551-0.177,4.433l-7.176,2.903c-4.88,1.977-9.314,5.207-11.973,9.827v0.009
-	c-0.749,1.295-1.346,2.674-1.783,4.113l-0.008,0.025c-0.488,1.497-1.657,2.314-3.215,2.364v-0.009
-	c-9.111,0-19.484,4.45-23.515,13.083L6,129.868l0.555,1.203c2.329,4.938,6.788,8.535,11.75,10.625
-	c2.499,1.054,5.145,1.71,7.827,2.076c2.492,0.34,6.192-0.33,7.187,2.686l0.008,0.034c2.037,6.672,7.455,11.375,13.781,13.916
-	l7.176,2.893c2.213,0.893,2.17,3.282,0.186,4.434l-6.656,3.854c-0.336,0.194-0.74,0.219-1.101,0.076l-30.876-12.428l-2.112,5.242
-	l22.725,9.136c2.031,0.822,2.332,3.19,0.378,4.326l-8.506,4.921c-0.336,0.194-0.74,0.22-1.103,0.077l-14.167-5.704l-2.103,5.241
-	l13.048,5.25c0.539,0.211,0.858,0.775,0.783,1.346l-1.96,13.931l5.586,0.782l2.129-15.126c0.05-0.378,0.277-0.723,0.613-0.917
-	l8.507-4.923c2.019-1.144,3.877,0.168,3.558,2.491v0.008l-3.408,24.247l5.587,0.782l4.635-32.963
-	c0.05-0.387,0.277-0.725,0.614-0.917l6.654-3.845c1.977-1.136,4.081-0.024,3.752,2.364v0.008l-1.077,7.666
-	c-0.965,6.754,0.486,13.777,5.199,18.887c1.399,1.406,0.882,3.116,0.087,4.685c-1.35,2.667-2.374,5.506-2.99,8.432
-	c-1.27,6.039-0.688,12.604,2.919,17.768l0.757,1.086l1.32,0.109c9.516,0.816,18.45-5.948,23.045-13.832l0.017-0.025
-	c0.815-1.328,2.128-1.926,3.65-1.606h0.018c0.143,0.034,0.278,0.059,0.403,0.093h0.009c1.194,0.252,2.55,0.421,4.029,0.421h0.008
-	h0.018c5.334,0,10.348-2.23,14.487-5.478l6.092-4.77c1.8-1.8,3.92,0.009,3.938,2.052l0.008,7.691c0,0.387-0.177,0.757-0.488,0.991
-	l-26.198,20.53l3.483,4.442l19.274-15.102c1.809-1.413,3.912-0.538,3.938,1.835v9.817c0,0.387-0.177,0.757-0.48,1.001l-12.022,9.415
-	l3.476,4.442l11.08-8.673c0.453-0.363,1.093-0.363,1.556,0l11.081,8.665l3.475-4.45l-12.031-9.406
-	c-0.312-0.234-0.487-0.605-0.487-0.992l-0.008-9.817c0-2.391,2.163-3.24,3.937-1.843l19.292,15.085l3.475-4.45L129.11,219.16
-	c-0.303-0.236-0.479-0.606-0.479-0.994l-0.008-7.672c0-2.431,1.986-3.374,3.938-2.07l6.092,4.762
-	c5.349,4.181,12.186,6.532,18.946,4.947l0.033-0.008c1.532-0.319,2.844,0.278,3.66,1.607l0.008,0.025
-	c4.663,7.958,13.475,14.576,23.068,13.806l1.312-0.109l0.757-1.085c3.088-4.435,3.973-9.96,3.332-15.251
-	c-0.331-2.738-1.05-5.427-2.071-7.986c-0.937-2.351-3.434-5.248-1.293-7.63l0.017-0.025c0.093-0.102,0.186-0.202,0.27-0.294h0.008
-	c4.552-5.082,5.831-11.988,4.897-18.593l-1.085-7.665v-0.009c-0.328-2.398,1.801-3.483,3.752-2.364v-0.009l6.654,3.845
-	c0.337,0.194,0.564,0.531,0.623,0.918l4.668,32.954l5.587-0.79l-3.433-24.248c-0.328-2.279,1.531-3.642,3.55-2.49l8.513,4.905
-	c0.337,0.193,0.564,0.53,0.615,0.917l2.145,15.126l5.587-0.799l-1.978-13.924c-0.076-0.572,0.244-1.136,0.782-1.347l13.049-5.266
-	l-2.112-5.232l-14.167,5.711c-0.361,0.152-0.766,0.118-1.103-0.076l-8.514-4.905c-2.044-1.195-1.75-3.458,0.388-4.324l22.698-9.17
-	l-2.111-5.233l-30.869,12.46c-0.354,0.143-0.765,0.118-1.102-0.076l-6.655-3.844c-1.985-1.152-2.027-3.551,0.186-4.434l7.168-2.894
-	c4.888-1.978,9.321-5.2,11.979-9.826h0.008c0.734-1.285,1.392-2.679,1.776-4.114l0.008-0.027c0.472-1.447,1.716-2.314,3.223-2.363
-	c9.161,0,19.446-4.398,23.523-13.065l0.555-1.195L244.95,128.54 M122.909,111.662l-2.28,5.695c-0.211,0.522-0.563,1.001-1.027,1.321
-	c-0.126,0.102-0.261,0.194-0.413,0.244c-0.513,0.235-1.069,0.278-1.616,0.211h-0.017l-6.074-0.866
-	c-0.556-0.084-0.984-0.522-1.069-1.069l-1.799-12.476c-0.118-0.783-0.018-1.599,0.479-2.238c0.219-0.53,0.707-0.815,1.271-0.756
-	c0.825-0.144,1.606,0.184,2.246,0.688l9.902,7.791C122.951,110.552,123.11,111.142,122.909,111.662 M113.091,129.701v0.067v0.009
-	v0.017v0.008c0,0.631-0.253,1.255-0.647,1.742l-3.787,4.829c-0.345,0.438-0.942,0.598-1.463,0.387l-11.703-4.677
-	c-0.934-0.371-1.81-1.145-1.859-2.213v-0.143c0.05-1.077,0.917-1.843,1.859-2.221l11.694-4.694c0.521-0.211,1.111-0.051,1.456,0.387
-	l3.803,4.82C112.822,128.489,113.074,129.086,113.091,129.701 M119.628,65.222c1.725-0.614,3.298,0.126,3.306,2.103v8.321
-	c-0.011,2.06-2.067,2.932-3.651,1.701l-7.126-5.579c-1.531-1.204-1.296-3.34,0.598-4.03L119.628,65.222 M92.554,59.72
-	c0.945-2.729,1.449-5.624,1.272-8.516c-0.111-1.812-0.27-3.954,1.959-4.441l0.043-0.009c4.857-0.923,9.701,1.017,13.503,3.963
-	l0.034,0.017l7.539,5.907c1.304,1.026,1.405,3.054-0.337,3.692h-0.008l-9.179,3.357c-4.466,1.619-9.806,2.1-14.092-0.328
-	l-0.025-0.008C91.912,62.606,92.151,60.949,92.554,59.72 M89.458,72.945l0.017-0.066c0.319-1.019,0.875-2.002,1.801-2.584
-	l0.083-0.05c0.977-0.513,2.155-0.548,3.214-0.303l0.059,0.018c2.224,0.64,4.138,2.082,6.035,3.347
-	c2.364,1.575,4.832,3.001,7.241,4.503c4.81,2.999,9.895,5.703,14.437,9.102c0.361,0.236,0.589,0.64,0.589,1.069v8.219
-	c-0.01,1.805-1.747,3.191-3.374,1.994l-18.933-13.85c-1.68-1.23-1.901-0.986-1.689,1.069l2.551,23.229
-	c0.219,2.036-1.784,2.853-3.416,1.929l-7.126-4.106c-0.37-0.211-0.605-0.606-0.631-1.036c0-5.447-0.452-10.882-0.647-16.323
-	c-0.103-2.809-0.197-5.616-0.265-8.426C89.343,78.152,88.847,75.433,89.458,72.945 M67.172,38.619
-	c0.077-1.941,0.291-7.26,3.193-6.978c3.127,0.303,6.217,1.892,8.687,3.762c5.427,4.11,9.533,10.97,9.135,17.931
-	c-0.131,2.289-0.78,7.32-3.873,7.299c-3.157-0.022-6.271-1.382-8.732-3.294C70.017,53.016,66.899,45.597,67.172,38.619
-	 M65.312,70.766c0.32-3.062,1.439-6.016,3.45-8.361l0.033-0.043c1.254-1.363,2.751-0.908,4.064,0.025h0.008
-	c2.591,1.842,5.586,3.113,8.725,3.643l0.042,0.009c1.246,0.243,2.718,0.815,2.776,2.304h0.009v0.084
-	c0,0.009,0.008,0.009,0.008,0.017L84.42,68.47v0.017c-0.139,4.988-3.037,9.26-6.757,12.376l-7.479,6.284h-0.009
-	c-1.438,1.22-3.128,0.084-3.373-1.547l-1.346-9.481v-0.025l-0.008-0.017C65.217,74.314,65.134,72.536,65.312,70.766 M73.053,96.157
-	c-1.683-0.985-1.565-2.743-0.168-3.92v0.009l5.611-4.711c1.541-1.287,3.492-0.462,3.787,1.505l1.27,8.951
-	c0.294,2.07-1.421,3.365-3.289,2.313L73.053,96.157 M77.1,109.206h-0.008l-8.388,3.39c-1.787,0.726-3.566-0.544-3.188-2.524
-	l1.253-7.209c0.32-1.825,1.751-2.785,3.466-1.818l7.21,4.148C79.287,106.261,79.025,108.415,77.1,109.206 M38.869,114.304
-	l0.018-0.043c1.654-4.694,5.679-7.884,10.164-9.726l0.034-0.008l0.009-0.01l8.876-3.583c1.54-0.623,3.34,0.286,3.038,2.137v0.008
-	l-1.683,9.625c-0.413,2.397-1.162,4.762-2.373,6.874v0.008c-1.212,2.087-2.886,3.896-4.939,5.166l-0.025,0.017
-	c-1.3,0.779-2.643-0.237-3.5-1.193c-1.217-1.389-2.507-2.652-4.019-3.721C42.552,118.499,37.89,117.482,38.869,114.304
-	 M27.858,138.349H27.85c-3.118-0.303-6.21-1.166-8.985-2.632c-1.943-1.026-7.146-4.028-5.829-6.833
-	c1.231-2.625,4.985-4.574,7.509-5.657c3.399-1.458,7.156-2.16,10.855-1.964c3.403,0.183,6.827,1.154,9.654,3.096
-	c1.436,0.986,2.596,2.201,3.679,3.555c1.137,1.419,1.128,2.244,0.084,3.711C41.002,136.984,34.181,138.95,27.858,138.349
-	 M58.027,158.726l-0.008-0.009l-8.875-3.567l-0.026-0.009l-0.018-0.008c-4.5-1.834-8.522-5.006-10.188-9.708l-0.018-0.051
-	c-0.748-2.426,1.702-3.257,3.375-4.166c2.362-1.281,4.492-3.001,6.198-5.08l0.027-0.034c0.858-0.976,2.17-2.001,3.499-1.203
-	l0.025,0.017c4.237,2.631,6.497,7.251,7.336,12.039l1.691,9.625C61.375,158.397,59.575,159.332,58.027,158.726 M58.396,132.78
-	l-0.049-0.05c-0.716-0.783-1.296-1.757-1.337-2.852v-0.101c0.034-1.086,0.613-2.062,1.337-2.853l0.042-0.05
-	c1.702-1.628,3.951-2.574,6.031-3.61c2.504-1.248,4.937-2.651,7.405-3.967c4.989-2.659,9.837-5.864,15.092-7.97
-	c0.387-0.194,0.842-0.186,1.22,0.025l7.118,4.105c1.614,0.935,1.934,3.071,0.05,3.913v0.009l-21.463,9.489
-	c-2.04,0.814-1.352,1.295,0,1.891l21.48,9.459c1.884,0.833,1.565,2.979-0.043,3.913l-7.118,4.121
-	c-1.537,0.874-6.074-2.477-7.494-3.229c-2.588-1.374-5.175-2.752-7.765-4.125c-2.497-1.323-4.962-2.714-7.479-3.999
-	C63.031,135.674,60.369,134.668,58.396,132.78 M73.111,163.471l7.202-4.165c1.769-1.005,3.632,0.296,3.299,2.313l-1.263,8.961
-	c-0.278,1.952-2.245,2.784-3.778,1.505l-0.008-0.008l-5.611-4.695C71.6,166.259,71.505,164.409,73.111,163.471 M70.285,158.59
-	c-1.725,0.967-3.129,0.018-3.466-1.809l-1.271-7.219c-0.343-1.947,1.362-3.263,3.188-2.524l8.396,3.374
-	c1.901,0.773,2.204,2.928,0.354,4.004v0.009L70.285,158.59 M65.541,183.561l0.008-0.008v-0.025l1.337-9.49
-	c0.226-1.626,1.982-2.71,3.366-1.549l7.504,6.268c1.865,1.557,3.543,3.381,4.761,5.494v0.009c1.381,2.365,3.974,9.068-0.815,9.322
-	c-3.424,0.581-6.377,2.07-9.212,4.021c-1.127,0.851-2.625,0.698-3.576-0.336C65.768,193.294,64.864,188.537,65.541,183.561
-	 M84.217,218.837c-2.08,2.894-4.743,5.296-7.835,7.062c-1.792,1.024-6.002,3.604-7.732,1.36c-1.711-2.218-1.535-5.726-1.316-8.355
-	c0.292-3.513,1.221-6.947,2.905-10.055c1.733-3.196,4.226-6.052,7.395-7.881c1.93-1.115,5.37-2.728,7.669-2.098
-	c2.775,0.762,3.029,7.227,2.87,9.444C87.9,212.104,86.409,215.759,84.217,218.837 M89.559,186.657
-	c-0.559-2.268-0.209-4.666-0.095-6.964c0.141-2.848,0.152-5.706,0.251-8.557c0.103-2.956,0.205-5.912,0.318-8.867
-	c0.099-2.568-0.289-5.596,0.326-8.096c0.026-0.429,0.261-0.825,0.631-1.043l7.118-4.115c1.641-0.942,3.626-0.126,3.416,1.91v0.009
-	l-2.607,24.181c-0.086,0.995,0.38,1.091,1,0.636l19.661-14.41c1.717-1.245,3.357,0.143,3.374,1.995l0.009,8.219
-	c0,0.438-0.227,0.833-0.589,1.069c-4.799,2.4-9.068,5.746-13.602,8.589c-2.367,1.484-4.739,2.958-7.123,4.413
-	c-2.24,1.367-4.426,3.236-6.979,3.977l-0.067,0.017C90.628,190.183,89.559,186.657,89.559,186.657 M116.943,202.895v0.009
-	l-7.538,5.905l-0.026,0.017l-0.008,0.009c-3.128,2.43-6.89,4.197-10.919,4.197h-0.009c-0.009,0-0.009,0-0.018,0h-0.041
-	c-0.917-0.007-1.76-0.1-2.507-0.235l-0.05-0.008c-1.827-0.404-2.163-1.952-2.02-3.534v-0.008c0.238-2.324,0.03-4.698-0.503-6.97
-	c-0.39-1.656-2.152-4.898-0.002-6.078l0.017-0.008c4.383-2.364,9.54-1.994,14.1-0.337l9.179,3.349
-	C118.349,199.84,118.249,201.868,116.943,202.895 M122.968,192.217c-0.008,1.961-1.591,2.71-3.297,2.096h-0.009l-6.882-2.507
-	c-1.876-0.69-2.12-2.827-0.588-4.03l7.118-5.578c1.632-1.27,3.634-0.505,3.652,1.691l0.008,8.32
-	C122.968,192.209,122.968,192.209,122.968,192.217 M122.522,149.337l-9.894,7.79c-0.799,0.622-1.893,0.993-2.852,0.514l-0.126-0.076
-	c-0.909-0.589-1.144-1.725-0.993-2.727l1.783-12.467c0.075-0.556,0.514-0.993,1.068-1.077l6.067-0.875
-	c0.53-0.075,1.043-0.017,1.539,0.195c0.109,0.023,0.21,0.066,0.303,0.116c0.008,0.009,0.017,0.009,0.025,0.018
-	c0.556,0.312,0.96,0.851,1.195,1.431l2.28,5.696C123.127,148.394,122.968,148.992,122.522,149.337 M193.503,100.852l8.884,3.583
-	h0.009l0.026,0.009c2.944,1.203,5.721,2.953,7.749,5.426h0.008c1.044,1.279,1.876,2.735,2.424,4.292l0.017,0.049
-	c0.697,2.245-1.394,3.169-3.043,3.999c-2.506,1.258-4.754,3.09-6.54,5.248l-0.024,0.026c-0.859,0.975-2.163,1.994-3.492,1.203
-	l-0.026-0.017c-4.254-2.556-6.504-7.304-7.336-12.04l-1.682-9.625C190.155,101.171,191.947,100.23,193.503,100.852 M185.175,66.585
-	c1.127,2.995,1.245,6.268,0.816,9.423v0.016v0.025l-1.346,9.482c-0.235,1.609-1.983,2.709-3.366,1.547l-7.496-6.268
-	c-3.727-3.113-6.621-7.387-6.773-12.368v-0.051c-0.008-1.556,1.514-2.145,2.792-2.406l0.034-0.008
-	c3.424-0.582,6.386-2.062,9.221-4.013c1.127-0.857,2.625-0.698,3.575,0.337l0.034,0.033
-	C183.744,63.59,184.586,65.037,185.175,66.585 M174.035,105.142l7.202-4.165c1.725-0.975,3.129-0.017,3.466,1.818l1.271,7.209
-	c0.336,1.961-1.372,3.24-3.188,2.525h-0.008l-8.388-3.383C172.499,108.414,172.204,106.189,174.035,105.142 M171.209,100.254
-	c-1.868,1.06-3.601-0.211-3.298-2.314l1.262-8.959c0.287-1.944,2.255-2.786,3.786-1.499h0.009l5.611,4.694
-	c1.397,1.178,1.515,2.928-0.16,3.913h-0.008L171.209,100.254 M167.339,40.723c2.771-3.857,6.715-7.003,11.179-8.684
-	c1.596-0.601,3.57-1.128,4.628,0.589c1.109,1.8,1.155,4.237,1.13,6.284c-0.12,10-6.706,21.659-17.88,21.716h-0.009
-	c-2.822,0-3.156-7.497-3.033-9.303C163.616,47.506,165.127,43.821,167.339,40.723 M134.603,56.641l7.538-5.907v0.008l0.026-0.017
-	l0.008-0.008c3.836-2.979,8.607-4.88,13.502-3.963l0.051,0.009c2.955,0.657,1.832,4.427,1.942,6.579
-	c0.097,1.899,0.475,3.773,1.029,5.589c0.427,1.401,1.226,3.482-0.447,4.423l-0.034,0.006c-4.279,2.427-9.632,1.957-14.092,0.329
-	l-9.179-3.357C133.26,59.725,133.313,57.638,134.603,56.641 M128.571,67.326c0.008-1.961,1.59-2.718,3.306-2.095v-0.009l6.882,2.515
-	c1.81,0.667,2.076,2.858,0.588,4.031l-7.126,5.578c-1.656,1.286-3.63,0.427-3.651-1.701V67.326 M128.571,87.98
-	c0-0.43,0.226-0.833,0.588-1.069c1.422-1.421,3.481-2.203,5.164-3.268c2.546-1.611,5.095-3.218,7.649-4.817
-	c2.633-1.645,5.268-3.288,7.922-4.902c2.241-1.364,4.421-3.233,6.979-3.965l0.067-0.018c1.035-0.236,2.17-0.252,3.138,0.261
-	l0.083,0.051c0.925,0.58,1.481,1.572,1.801,2.591l0.017,0.06c0.552,2.248,0.202,4.626,0.094,6.904
-	c-0.135,2.847-0.158,5.704-0.258,8.553c-0.198,5.674-0.659,11.347-0.659,17.026c-0.017,0.429-0.253,0.825-0.631,1.035l-7.118,4.114
-	c-1.641,0.934-3.643,0.117-3.408-1.919v-0.008c0,0,0,0,0-0.008l2.442-22.57c0.256-2.378-0.135-2.673-2.175-1.238l-18.322,13.402
-	c-1.681,1.214-3.355-0.134-3.374-1.994V87.98 M156.015,127.47c0.941,0.379,1.809,1.145,1.859,2.222v0.134
-	c-0.051,1.078-0.918,1.843-1.859,2.222l-11.694,4.693c-0.521,0.202-1.119,0.041-1.464-0.396l-3.795-4.82
-	c-0.387-0.488-0.648-1.103-0.648-1.733v-0.018v-0.008v-0.017c0-0.008,0-0.008,0-0.008v-0.059c0.017-0.615,0.27-1.211,0.648-1.691
-	l3.795-4.812c0.345-0.446,0.934-0.605,1.455-0.395L156.015,127.47 M128.991,110.207l9.903-7.791c0.798-0.63,1.91-1.001,2.869-0.504
-	l0.109,0.067c0.908,0.589,1.135,1.724,0.992,2.727l-1.792,12.476c-0.075,0.546-0.513,0.985-1.068,1.069l-6.066,0.875h-0.009
-	c-0.63,0.083-1.279,0.008-1.833-0.32v0.009c-0.009-0.009-0.009-0.009-0.018-0.009c0,0,0-0.008-0.008-0.008
-	c-0.546-0.312-0.959-0.851-1.195-1.439l-2.279-5.696C128.395,111.142,128.555,110.552,128.991,110.207 M128.613,147.873l2.271-5.695
-	c0.228-0.589,0.639-1.127,1.194-1.438c0.009-0.009,0.009-0.009,0.018-0.018c0.548-0.312,1.223-0.407,1.842-0.311l6.074,0.867
-	c0.555,0.084,0.992,0.514,1.068,1.069l1.801,12.476c0.143,1.002-0.093,2.138-0.993,2.726l-0.118,0.068
-	c-0.959,0.487-2.061,0.117-2.852-0.496l-0.008-0.01l-9.912-7.782C128.562,148.983,128.402,148.394,128.613,147.873 M131.919,194.304
-	c-1.725,0.624-3.307-0.125-3.307-2.095l-0.008-8.312c0-2.178,2.027-2.969,3.651-1.707l7.126,5.569
-	c1.532,1.203,1.296,3.332-0.589,4.029L131.919,194.304 M158.992,199.79c-0.94,2.726-1.449,5.627-1.271,8.516
-	c0.111,1.81,0.279,3.954-1.95,4.44l-0.042,0.018c-1.624,0.302-3.298,0.31-4.931,0.042h-0.008c-3.155-0.522-6.057-2.045-8.565-3.996
-	l-0.017-0.008l-0.025-0.017l-7.539-5.898c-1.304-1.026-1.405-3.063,0.345-3.694l9.169-3.356c4.605-1.694,9.651-1.989,14.102,0.312
-	l0.024,0.017C159.635,196.896,159.4,198.572,158.992,199.79 M162.013,186.606l-0.017,0.068c-0.32,1.018-0.875,2.011-1.801,2.591
-	l-0.084,0.052c-0.968,0.505-2.094,0.496-3.139,0.261l-0.067-0.017c-2.225-0.634-4.138-2.081-6.035-3.348
-	c-2.362-1.575-4.831-2.998-7.24-4.5c-4.81-2.999-9.907-5.69-14.446-9.097c-0.362-0.229-0.588-0.632-0.588-1.061v-8.219
-	c0-1.859,1.674-3.223,3.365-2.002l19.607,14.338c0.58,0.414,1.156,0.126,1.079-0.583l-2.64-24.179
-	c-0.219-2.044,1.775-2.861,3.408-1.926l7.126,4.113c0.37,0.211,0.613,0.605,0.63,1.034c0,5.429,0.444,10.85,0.64,16.272
-	c0.101,2.804,0.188,5.608,0.255,8.412C162.128,181.363,162.625,184.099,162.013,186.606 M183.492,225.686
-	c-2.325,7.154-14.435-4.463-16.363-7.261c-2.321-3.367-3.824-7.405-3.786-11.527c0.023-2.728,0.635-8.294,4.45-7.951h0.008
-	C179.682,200.061,186.936,215.029,183.492,225.686 M186.158,188.802c-0.317,3.055-1.446,6.021-3.457,8.363l-0.025,0.042
-	c-2.261,2.427-6.048-1.414-8.262-2.328c-1.838-0.759-7.371-1-7.371-3.746c0,0,0,0,0-0.009v-0.008c0-2.398,0.814-4.846,2.003-6.907
-	V184.2c1.229-2.112,2.895-3.937,4.761-5.502l7.488-6.276c1.455-1.229,3.129-0.084,3.382,1.548l1.337,9.482v0.007l0.008,0.034
-	C186.268,185.252,186.335,187.036,186.158,188.802 M178.427,163.411c1.682,0.985,1.565,2.735,0.168,3.913l-5.611,4.703
-	c-1.54,1.286-3.49,0.461-3.786-1.506l-1.271-8.952c-0.284-2.043,1.437-3.393,3.298-2.313L178.427,163.411 M172.799,152.45
-	c0-0.842,0.555-1.665,1.598-2.095l8.388-3.382c1.799-0.721,3.484,0.621,3.196,2.523l-1.261,7.219
-	c-0.309,1.737-1.833,2.728-3.466,1.809l-7.21-4.155C173.202,153.879,172.799,153.156,172.799,152.45 M174.935,142.783
-	c-2.142,1.139-4.287,2.271-6.437,3.396c-1.089,0.57-3.836,2.777-5.14,2.022l-7.118-4.106c-1.615-0.933-1.935-3.079-0.042-3.92v0.008
-	l21.159-9.347c2.407-1.063,2.291-1.154,0.032-2.155l-21.199-9.346c-1.817-0.798-1.53-3.009,0.042-3.913l7.117-4.114
-	c0.37-0.219,0.834-0.227,1.211-0.025c4.721,2.948,9.898,5.176,14.807,7.792c2.452,1.307,4.874,2.69,7.363,3.924
-	c2.196,1.088,4.588,2.071,6.376,3.799l0.051,0.05c0.724,0.783,1.295,1.759,1.337,2.852v0.092c-0.034,1.094-0.613,2.069-1.337,2.861
-	l-0.043,0.042c-2.296,2.04-5.512,3.445-8.204,4.889C181.608,139.358,178.252,141.032,174.935,142.783 M212.626,145.273l-0.016,0.051
-	c-1.658,4.704-5.679,7.883-10.172,9.717l-0.025,0.008l-0.034,0.017l-8.859,3.576c-1.54,0.614-3.357-0.295-3.029-2.145
-	c0-0.008,0-0.008,0-0.008l1.683-9.617c0.782-4.476,2.776-8.843,6.554-11.543h0.008c0.252-0.184,0.505-0.354,0.757-0.504l0.026-0.017
-	c1.329-0.798,2.634,0.228,3.5,1.203h-0.008c1.594,1.823,3.424,3.454,5.505,4.702C210.309,141.784,213.488,142.463,212.626,145.273
-	 M235.031,134.092c-6.19,4.424-15.148,5.719-22.142,2.499c-2.475-1.14-6.275-3.585-6.898-6.488
-	c-0.542-2.524,3.672-5.455,5.485-6.512c5.411-3.153,12.334-3.078,18.114-1.019c2.928,1.043,6.185,2.656,8.286,4.991
-	C240.382,130.343,237.244,132.498,235.031,134.092"
-            />
-            <polygon
-              fill="none"
-              stroke="#B5BCC9"
-              stroke-width="2"
-              stroke-miterlimit="10"
-              points="432.973,4 384.89,26.076 341.765,56.716
-	329.928,77.26 325.073,129.868 330.021,182.476 342.096,201.555 385.016,233.518 433.04,255.545 456.757,255.537 504.755,233.454
-	547.848,202.88 559.701,182.344 564.58,129.736 559.665,77.125 547.804,56.588 504.694,26.05 456.681,4 "
-            />
-            <line
-              fill="none"
-              stroke="#B5BCC9"
-              stroke-width="2"
-              stroke-linecap="round"
-              stroke-miterlimit="10"
-              x1="272.29"
-              y1="128.886"
-              x2="302.29"
-              y2="128.886"
-            />
-            <line
-              fill="none"
-              stroke="#B5BCC9"
-              stroke-width="2"
-              stroke-linecap="round"
-              stroke-miterlimit="10"
-              x1="302.29"
-              y1="128.886"
-              x2="291.029"
-              y2="117.625"
-            />
-            <line
-              fill="none"
-              stroke="#B5BCC9"
-              stroke-width="2"
-              stroke-linecap="round"
-              stroke-miterlimit="10"
-              x1="302.29"
-              y1="128.886"
-              x2="290.225"
-              y2="140.952"
-            />
-          </svg>
-
-          <h1>Use rough approximation</h1>
-          Certain geometries can be very time consuming to compute, eg. several
-          hundred unique snowflakes. You may wish to use a simple polygon
-          approximation to speed up the process, at the cost of greater material
-          use.<br /><br />
-          If your vector not unique (ie. several hundred identical snowflakes)
-          using the "quantity" field is another way to speed up the process
-          dramatically.
         </div>
 
         <div class="config_explain" id="explain_rotations">
@@ -1937,471 +1778,6 @@
           Reduce the overall <em>area</em>, but may produce nests that aren't
           rectangular. It is best used for irregularly shaped sheets, or when
           all sheets will be filled with no space left behind.
-        </div>
-
-        <div class="config_explain" id="explain_threads">
-          <svg
-            version="1.1"
-            xmlns="http://www.w3.org/2000/svg"
-            xmlns:xlink="http://www.w3.org/1999/xlink"
-            x="0px"
-            y="0px"
-            width="454.586px"
-            height="195.099px"
-            viewBox="0 0 454.586 195.099"
-            enable-background="new 0 0 454.586 195.099"
-            xml:space="preserve"
-          >
-            <path
-              fill="none"
-              stroke="#B4BBC8"
-              stroke-width="2"
-              stroke-miterlimit="10"
-              d="M85.843,68.843c0,9.941-8.06,18-18,18H22
-	c-9.941,0-18-8.059-18-18V23c0-9.941,8.059-18,18-18h45.843c9.94,0,18,8.059,18,18V68.843z"
-            />
-            <path
-              fill="none"
-              stroke="#B4BBC8"
-              stroke-width="2"
-              stroke-miterlimit="10"
-              d="M183.058,68.843c0,9.941-8.06,18-18,18h-45.843
-	c-9.941,0-18-8.059-18-18V23c0-9.941,8.059-18,18-18h45.843c9.94,0,18,8.059,18,18V68.843z"
-            />
-            <path
-              fill="none"
-              stroke="#B4BBC8"
-              stroke-width="2"
-              stroke-miterlimit="10"
-              d="M182.257,166.843c0,9.941-8.06,18-18,18h-45.843
-	c-9.941,0-18-8.059-18-18V121c0-9.941,8.059-18,18-18h45.843c9.94,0,18,8.059,18,18V166.843z"
-            />
-            <path
-              fill="none"
-              stroke="#B4BBC8"
-              stroke-width="2"
-              stroke-miterlimit="10"
-              d="M279.472,166.843c0,9.941-8.06,18-18,18h-45.843
-	c-9.941,0-18-8.059-18-18V121c0-9.941,8.059-18,18-18h45.843c9.94,0,18,8.059,18,18V166.843z"
-            />
-          </svg>
-
-          <h1>CPU Cores</h1>
-          The number of concurrent nesting processes. 2 for most laptops and 4
-          for most desktops.
-        </div>
-
-        <div class="config_explain" id="explain_mergeLines">
-          <svg
-            version="1.1"
-            xmlns="http://www.w3.org/2000/svg"
-            xmlns:xlink="http://www.w3.org/1999/xlink"
-            x="0px"
-            y="0px"
-            width="441px"
-            height="350px"
-            viewBox="0 0 441 350"
-            enable-background="new 0 0 441 350"
-            xml:space="preserve"
-          >
-            <path
-              fill="none"
-              stroke="#B5BCC9"
-              stroke-width="2"
-              stroke-miterlimit="10"
-              d="M216.674,13.299C216.674,7.06,211.616,2,205.376,2
-	H13.299C7.06,2,2,7.059,2,13.299v146.88c0,6.24,5.059,11.299,11.299,11.299 M205.376,171.479c6.24,0,11.298-5.059,11.298-11.299
-	 M171.48,75.44c-15.599,0-28.247-12.646-28.247-28.246c0-15.601,12.648-28.247,28.247-28.247c15.6,0,28.247,12.646,28.247,28.247
-	C199.727,62.794,187.08,75.44,171.48,75.44z"
-            />
-            <path
-              fill="none"
-              stroke="#B5BCC9"
-              stroke-width="2"
-              stroke-miterlimit="10"
-              d="M216.674,160.18c0,6.24,5.059,11.299,11.3,11.299
-	 M420.05,171.479c6.24,0,11.298-5.059,11.298-11.299V13.299C431.348,7.06,426.29,2,420.05,2H227.974c-6.24,0-11.3,5.059-11.3,11.299
-	 M386.154,75.44c-15.6,0-28.247-12.646-28.247-28.246c0-15.601,12.647-28.247,28.247-28.247s28.247,12.646,28.247,28.247
-	C414.401,62.794,401.754,75.44,386.154,75.44z"
-            />
-            <path
-              fill="none"
-              stroke="#B5BCC9"
-              stroke-width="2"
-              stroke-miterlimit="10"
-              d="M216.674,182.334c0-6.24-5.058-11.3-11.298-11.3
-	 M13.299,171.034c-6.24,0-11.299,5.059-11.299,11.3v146.88c0,6.24,5.059,11.299,11.299,11.299h192.077
-	c6.24,0,11.298-5.059,11.298-11.299 M171.48,244.475c-15.599,0-28.247-12.646-28.247-28.246c0-15.601,12.648-28.247,28.247-28.247
-	c15.6,0,28.247,12.646,28.247,28.247C199.727,231.829,187.08,244.475,171.48,244.475z"
-            />
-            <path
-              fill="none"
-              stroke="#B5BCC9"
-              stroke-width="2"
-              stroke-miterlimit="10"
-              d="M216.674,329.214c0,6.24,5.059,11.299,11.3,11.299
-	H420.05c6.24,0,11.298-5.059,11.298-11.299v-146.88c0-6.24-5.058-11.3-11.298-11.3 M227.974,171.034c-6.24,0-11.3,5.059-11.3,11.3
-	 M386.154,244.475c-15.6,0-28.247-12.646-28.247-28.246c0-15.601,12.647-28.247,28.247-28.247s28.247,12.646,28.247,28.247
-	C414.401,231.829,401.754,244.475,386.154,244.475z"
-            />
-            <g>
-              <g>
-                <line
-                  fill="#B5BCC9"
-                  stroke="#B5BCC9"
-                  stroke-width="2"
-                  stroke-miterlimit="10"
-                  x1="216.674"
-                  y1="13.299"
-                  x2="216.674"
-                  y2="15.799"
-                />
-              </g>
-              <g>
-                <path
-                  fill="#B5BCC9"
-                  stroke="#B5BCC9"
-                  stroke-width="2"
-                  stroke-miterlimit="10"
-                  d="M216.674,147.895v4.893 M216.674,138.11v4.892
-			 M216.674,128.325v4.893 M216.674,118.541v4.893 M216.674,108.755v4.893 M216.674,98.971v4.893 M216.674,89.186v4.892
-			 M216.674,79.401v4.893 M216.674,69.616v4.893 M216.674,59.832v4.892 M216.674,50.046v4.893 M216.674,40.262v4.892
-			 M216.674,30.477v4.893 M216.674,20.692v4.893"
-                />
-              </g>
-              <g>
-                <line
-                  fill="#B5BCC9"
-                  stroke="#B5BCC9"
-                  stroke-width="2"
-                  stroke-miterlimit="10"
-                  x1="216.674"
-                  y1="157.68"
-                  x2="216.674"
-                  y2="160.18"
-                />
-              </g>
-            </g>
-            <g>
-              <g>
-                <line
-                  fill="#B5BCC9"
-                  stroke="#B5BCC9"
-                  stroke-width="2"
-                  stroke-miterlimit="10"
-                  x1="216.674"
-                  y1="182.436"
-                  x2="216.674"
-                  y2="184.936"
-                />
-              </g>
-              <g>
-                <path
-                  fill="#B5BCC9"
-                  stroke="#B5BCC9"
-                  stroke-width="2"
-                  stroke-miterlimit="10"
-                  d="M216.674,317.032v4.893 M216.674,307.247v4.892
-			 M216.674,297.462v4.893 M216.674,287.677v4.893 M216.674,277.892v4.893 M216.674,268.107V273 M216.674,258.323v4.892
-			 M216.674,248.538v4.893 M216.674,238.753v4.893 M216.674,228.968v4.892 M216.674,219.183v4.893 M216.674,209.398v4.892
-			 M216.674,199.613v4.893 M216.674,189.829v4.893"
-                />
-              </g>
-              <g>
-                <line
-                  fill="#B5BCC9"
-                  stroke="#B5BCC9"
-                  stroke-width="2"
-                  stroke-miterlimit="10"
-                  x1="216.674"
-                  y1="326.816"
-                  x2="216.674"
-                  y2="329.316"
-                />
-              </g>
-            </g>
-            <g>
-              <g>
-                <line
-                  fill="#B5BCC9"
-                  stroke="#B5BCC9"
-                  stroke-width="2"
-                  stroke-miterlimit="10"
-                  x1="417.55"
-                  y1="171.034"
-                  x2="420.05"
-                  y2="171.034"
-                />
-              </g>
-              <g>
-                <path
-                  fill="#B5BCC9"
-                  stroke="#B5BCC9"
-                  stroke-width="2"
-                  stroke-miterlimit="10"
-                  d="M407.438,171.034h5.056 M397.326,171.034h5.056
-			 M387.214,171.034h5.056 M377.102,171.034h5.056 M366.989,171.034h5.056 M356.877,171.034h5.056 M346.765,171.034h5.056
-			 M336.652,171.034h5.056 M326.54,171.034h5.056 M316.428,171.034h5.056 M306.316,171.034h5.056 M296.204,171.034h5.056
-			 M286.091,171.034h5.056 M275.979,171.034h5.056 M265.867,171.034h5.056 M255.755,171.034h5.056 M245.643,171.034h5.056
-			 M235.53,171.034h5.056"
-                />
-              </g>
-              <g>
-                <line
-                  fill="#B5BCC9"
-                  stroke="#B5BCC9"
-                  stroke-width="2"
-                  stroke-miterlimit="10"
-                  x1="227.974"
-                  y1="171.034"
-                  x2="230.474"
-                  y2="171.034"
-                />
-              </g>
-            </g>
-            <g>
-              <g>
-                <line
-                  fill="#B5BCC9"
-                  stroke="#B5BCC9"
-                  stroke-width="2"
-                  stroke-miterlimit="10"
-                  x1="203.073"
-                  y1="171.034"
-                  x2="205.573"
-                  y2="171.034"
-                />
-              </g>
-              <g>
-                <path
-                  fill="#B5BCC9"
-                  stroke="#B5BCC9"
-                  stroke-width="2"
-                  stroke-miterlimit="10"
-                  d="M192.961,171.034h5.056 M182.849,171.034h5.056
-			 M172.737,171.034h5.056 M162.625,171.034h5.056 M152.512,171.034h5.056 M142.4,171.034h5.056 M132.288,171.034h5.056
-			 M122.175,171.034h5.056 M112.063,171.034h5.056 M101.951,171.034h5.056 M91.839,171.034h5.056 M81.727,171.034h5.056
-			 M71.614,171.034h5.056 M61.502,171.034h5.056 M51.39,171.034h5.056 M41.278,171.034h5.056 M31.166,171.034h5.056 M21.053,171.034
-			h5.056"
-                />
-              </g>
-              <g>
-                <line
-                  fill="#B5BCC9"
-                  stroke="#B5BCC9"
-                  stroke-width="2"
-                  stroke-miterlimit="10"
-                  x1="13.497"
-                  y1="171.034"
-                  x2="15.997"
-                  y2="171.034"
-                />
-              </g>
-            </g>
-          </svg>
-
-          <h1>Merge common lines</h1>
-          If set, part edges that touch will be merged into a single line in the
-          export. Merging common lines ensure that the laser only passes over
-          each line a single time, reducing cut time and heat warping.
-        </div>
-
-        <div class="config_explain" id="explain_timeRatio">
-          <svg
-            version="1.1"
-            xmlns="http://www.w3.org/2000/svg"
-            xmlns:xlink="http://www.w3.org/1999/xlink"
-            x="0px"
-            y="0px"
-            width="517px"
-            height="301px"
-            viewBox="0 0 517 301"
-            enable-background="new 0 0 517 301"
-            xml:space="preserve"
-          >
-            <g>
-              <path
-                fill="#EC2158"
-                d="M112.271,268.462c0.041-0.861,0.144-1.702,0.308-2.521c0.164-0.82,0.4-1.6,0.708-2.337
-		c0.307-0.738,0.727-1.384,1.261-1.938c0.532-0.554,1.204-0.994,2.014-1.322s1.778-0.492,2.906-0.492
-		c1.127,0,2.096,0.164,2.905,0.492s1.481,0.769,2.015,1.322c0.532,0.554,0.953,1.199,1.261,1.938
-		c0.308,0.737,0.543,1.517,0.707,2.337c0.164,0.819,0.267,1.66,0.308,2.521c0.041,0.86,0.062,1.69,0.062,2.49
-		s-0.021,1.63-0.062,2.491c-0.041,0.86-0.144,1.701-0.308,2.521s-0.399,1.594-0.707,2.321s-0.729,1.368-1.261,1.922
-		c-0.533,0.554-1.199,0.989-1.999,1.307c-0.8,0.318-1.773,0.477-2.921,0.477c-1.128,0-2.097-0.158-2.906-0.477
-		c-0.81-0.317-1.481-0.753-2.014-1.307c-0.534-0.554-0.954-1.194-1.261-1.922c-0.308-0.728-0.544-1.501-0.708-2.321
-		s-0.267-1.661-0.308-2.521c-0.041-0.861-0.062-1.691-0.062-2.491S112.229,269.322,112.271,268.462z M115.054,273.674
-		c0.051,1.015,0.216,1.968,0.492,2.859s0.723,1.646,1.338,2.261c0.614,0.614,1.476,0.922,2.583,0.922
-		c1.106,0,1.968-0.308,2.583-0.922c0.614-0.615,1.061-1.369,1.337-2.261c0.277-0.892,0.441-1.845,0.492-2.859
-		s0.077-1.932,0.077-2.752c0-0.533-0.005-1.123-0.016-1.769s-0.062-1.291-0.153-1.938c-0.093-0.646-0.227-1.275-0.4-1.891
-		s-0.43-1.153-0.769-1.614c-0.338-0.462-0.764-0.835-1.276-1.123c-0.513-0.286-1.138-0.43-1.875-0.43
-		c-0.738,0-1.364,0.144-1.876,0.43c-0.513,0.288-0.938,0.661-1.276,1.123c-0.338,0.461-0.595,0.999-0.769,1.614
-		c-0.175,0.615-0.308,1.245-0.399,1.891c-0.093,0.646-0.145,1.292-0.154,1.938c-0.011,0.646-0.016,1.235-0.016,1.769
-		C114.977,271.742,115.002,272.659,115.054,273.674z"
-              />
-            </g>
-            <g>
-              <path
-                fill="#EC2158"
-                d="M385.819,281.653v-15.621h-5.658v-2.091c0.738,0,1.456-0.057,2.153-0.169
-		c0.696-0.112,1.327-0.323,1.891-0.631s1.04-0.728,1.43-1.261c0.39-0.532,0.656-1.209,0.8-2.029h1.999v21.802H385.819z"
-              />
-            </g>
-            <path
-              fill="none"
-              stroke="#B4BBC8"
-              stroke-width="2"
-              stroke-miterlimit="10"
-              d="M276.737,8.839v65.262
-	c0,2.119,1.719,3.839,3.839,3.839h49.905c2.12,0,3.839-1.72,3.839-3.839V8.839c0-2.121-1.719-3.839-3.839-3.839h-49.905
-	C278.456,5,276.737,6.718,276.737,8.839z M301.69,20.355c0,5.3-4.297,9.598-9.598,9.598c-5.3,0-9.598-4.298-9.598-9.598
-	s4.298-9.598,9.598-9.598C297.394,10.758,301.69,15.056,301.69,20.355z"
-            />
-            <path
-              fill="none"
-              stroke="#B4BBC8"
-              stroke-width="2"
-              stroke-miterlimit="10"
-              d="M334.32,8.839v65.262
-	c0,2.119,1.719,3.839,3.839,3.839h49.905c2.12,0,3.839-1.719,3.839-3.839V8.839c0-2.12-1.719-3.839-3.839-3.839h-49.905
-	C336.039,5,334.32,6.719,334.32,8.839z M359.273,20.355c0,5.3-4.297,9.598-9.598,9.598c-5.3,0-9.598-4.298-9.598-9.598
-	s4.298-9.598,9.598-9.598C354.977,10.758,359.273,15.056,359.273,20.355z"
-            />
-            <path
-              fill="none"
-              stroke="#B4BBC8"
-              stroke-width="2"
-              stroke-miterlimit="10"
-              d="M276.737,81.839v65.262
-	c0,2.119,1.719,3.839,3.839,3.839h49.905c2.12,0,3.839-1.72,3.839-3.839V81.839c0-2.121-1.719-3.839-3.839-3.839h-49.905
-	C278.456,78,276.737,79.718,276.737,81.839z M301.69,93.355c0,5.3-4.297,9.598-9.598,9.598c-5.3,0-9.598-4.298-9.598-9.598
-	s4.298-9.598,9.598-9.598C297.394,83.758,301.69,88.056,301.69,93.355z"
-            />
-            <path
-              fill="none"
-              stroke="#B4BBC8"
-              stroke-width="2"
-              stroke-miterlimit="10"
-              d="M334.32,81.839v65.262
-	c0,2.119,1.719,3.839,3.839,3.839h49.905c2.12,0,3.839-1.72,3.839-3.839V81.839c0-2.121-1.719-3.839-3.839-3.839h-49.905
-	C336.039,78,334.32,79.718,334.32,81.839z M359.273,93.355c0,5.3-4.297,9.598-9.598,9.598c-5.3,0-9.598-4.298-9.598-9.598
-	s4.298-9.598,9.598-9.598C354.977,83.758,359.273,88.056,359.273,93.355z"
-            />
-            <rect
-              x="275.665"
-              y="5"
-              fill="none"
-              stroke="#B4BBC8"
-              stroke-width="2"
-              stroke-miterlimit="10"
-              width="227.341"
-              height="227.341"
-            />
-            <path
-              fill="none"
-              stroke="#B4BBC8"
-              stroke-width="2"
-              stroke-miterlimit="10"
-              d="M6.066,8.839v65.262
-	c0,2.119,1.719,3.839,3.839,3.839h49.905c2.12,0,3.839-1.72,3.839-3.839V8.839C63.649,6.718,61.931,5,59.811,5H9.905
-	C7.785,5,6.066,6.718,6.066,8.839z M31.02,20.355c0,5.3-4.297,9.598-9.598,9.598c-5.3,0-9.598-4.298-9.598-9.598
-	s4.298-9.598,9.598-9.598C26.723,10.758,31.02,15.056,31.02,20.355z"
-            />
-            <path
-              fill="none"
-              stroke="#B4BBC8"
-              stroke-width="2"
-              stroke-miterlimit="10"
-              d="M6.066,81.839v65.262
-	c0,2.119,1.719,3.839,3.839,3.839h49.905c2.12,0,3.839-1.72,3.839-3.839V81.839c0-2.121-1.719-3.839-3.839-3.839H9.905
-	C7.785,78,6.066,79.718,6.066,81.839z M31.02,93.355c0,5.3-4.297,9.598-9.598,9.598c-5.3,0-9.598-4.298-9.598-9.598
-	s4.298-9.598,9.598-9.598C26.723,83.758,31.02,88.056,31.02,93.355z"
-            />
-            <path
-              fill="none"
-              stroke="#B4BBC8"
-              stroke-width="2"
-              stroke-miterlimit="10"
-              d="M63.649,8.839v65.262
-	c0,2.119,1.719,3.839,3.839,3.839h49.905c2.12,0,3.839-1.72,3.839-3.839V8.839c0-2.121-1.719-3.839-3.839-3.839H67.488
-	C65.368,5,63.649,6.718,63.649,8.839z M88.603,20.355c0,5.3-4.297,9.598-9.598,9.598c-5.3,0-9.598-4.298-9.598-9.598
-	s4.298-9.598,9.598-9.598C84.306,10.758,88.603,15.056,88.603,20.355z"
-            />
-            <path
-              fill="none"
-              stroke="#B4BBC8"
-              stroke-width="2"
-              stroke-miterlimit="10"
-              d="M6.066,154.839v65.262
-	c0,2.119,1.719,3.839,3.839,3.839h49.905c2.12,0,3.839-1.72,3.839-3.839v-65.262c0-2.121-1.719-3.839-3.839-3.839H9.905
-	C7.785,151,6.066,152.718,6.066,154.839z M31.02,166.355c0,5.3-4.297,9.598-9.598,9.598c-5.3,0-9.598-4.298-9.598-9.598
-	s4.298-9.598,9.598-9.598C26.723,156.758,31.02,161.056,31.02,166.355z"
-            />
-            <rect
-              x="4.994"
-              y="5"
-              fill="none"
-              stroke="#B4BBC8"
-              stroke-width="2"
-              stroke-miterlimit="10"
-              width="227.341"
-              height="227.341"
-            />
-            <line
-              fill="none"
-              stroke="#EC2158"
-              stroke-width="2"
-              stroke-miterlimit="10"
-              x1="334.32"
-              y1="5"
-              x2="334.32"
-              y2="151"
-            />
-            <line
-              fill="none"
-              stroke="#EC2158"
-              stroke-width="2"
-              stroke-miterlimit="10"
-              x1="63.649"
-              y1="5"
-              x2="63.649"
-              y2="78.196"
-            />
-            <line
-              fill="none"
-              stroke="#EC2158"
-              stroke-width="2"
-              stroke-miterlimit="10"
-              x1="391.903"
-              y1="78"
-              x2="276.737"
-              y2="78"
-            />
-            <line
-              fill="none"
-              stroke="#EC2158"
-              stroke-width="2"
-              stroke-miterlimit="10"
-              x1="63.649"
-              y1="78"
-              x2="6.066"
-              y2="78"
-            />
-            <line
-              fill="none"
-              stroke="#EC2158"
-              stroke-width="2"
-              stroke-miterlimit="10"
-              x1="63.649"
-              y1="150.804"
-              x2="6.066"
-              y2="150.804"
-            />
-          </svg>
-          <h1>Optimization ratio</h1>
-          When placing each part, the program has to decide between whether
-          saving time or material is more important. When the optimization ratio
-          is 0, only material savings are considered. When the ratio is 1, time
-          savings are considered as important as material savings.
         </div>
 
         <div class="config_explain" id="explain_populationSize">
@@ -3344,236 +2720,91 @@
       </div>
 
       <div id="info" class="page" style="text-align: center">
-        <svg
+        <img
+          src="img/logosmall.svg"
+          alt="Grain-Nest logo"
           style="
-            max-width: 20em;
-            width: 75%;
+            max-width: 12em;
+            width: 50%;
             display: block;
-            margin: 2em auto 0 auto;
+            margin: 2em auto 1em auto;
           "
-          version="1.1"
-          id="Layer_1"
-          xmlns="http://www.w3.org/2000/svg"
-          xmlns:xlink="http://www.w3.org/1999/xlink"
-          x="0px"
-          y="0px"
-          width="283.46px"
-          height="283.46px"
-          viewBox="0 0 283.46 283.46"
-          enable-background="new 0 0 283.46 283.46"
-          xml:space="preserve"
-        >
-          <path
-            class="fill"
-            opacity="0.25"
-            fill="none"
-            stroke="#53B7DB"
-            stroke-width="2.5"
-            stroke-miterlimit="10"
-            d="M58.207,177.084
-		c19.709,0,35.742-16.035,35.742-35.746c0-19.709-16.033-35.742-35.742-35.742s-35.742,16.033-35.742,35.742
-		C22.464,161.049,38.498,177.084,58.207,177.084z M55.708,94.926c7.932,0,14.385-6.453,14.385-14.385
-		c0-7.93-6.453-14.383-14.385-14.383s-14.383,6.453-14.383,14.383C41.326,88.473,47.777,94.926,55.708,94.926z M78.611,72.159
-		c7.932,0,14.383-6.453,14.383-14.385c0-7.93-6.451-14.383-14.383-14.383s-14.385,6.453-14.385,14.383
-		C64.226,65.706,70.679,72.159,78.611,72.159z M126.435,23.184c-7.932,0-14.383,6.453-14.383,14.383
-		c0,7.932,6.451,14.385,14.383,14.385s14.385-6.453,14.385-14.385C140.82,29.637,134.367,23.184,126.435,23.184z M155.265,65.963
-		c7.932,0,14.387-6.453,14.387-14.385s-6.455-14.385-14.387-14.385c-7.93,0-14.383,6.453-14.383,14.385
-		S147.335,65.963,155.265,65.963z M233.72,116.983c0-7.932-6.453-14.385-14.385-14.385s-14.385,6.453-14.385,14.385
-		s6.453,14.385,14.385,14.385S233.72,124.915,233.72,116.983z M256.796,141.338c0-7.932-6.453-14.385-14.383-14.385
-		c-7.934,0-14.387,6.453-14.387,14.385s6.453,14.387,14.387,14.387C250.343,155.725,256.796,149.27,256.796,141.338z M168.119,73.459
-		c0,16.809,13.674,30.482,30.48,30.482s30.482-13.674,30.482-30.482c0-16.807-13.676-30.48-30.482-30.48
-		S168.119,56.653,168.119,73.459z M198.599,178.737c-16.807,0-30.48,13.674-30.48,30.48s13.674,30.48,30.48,30.48
-		s30.482-13.674,30.482-30.48S215.406,178.737,198.599,178.737z M81.339,88.62c0-2.873-2.338-5.211-5.211-5.211
-		c-2.875,0-5.211,2.338-5.211,5.211s2.336,5.209,5.211,5.209C79.001,93.829,81.339,91.493,81.339,88.62z M85.123,84.047
-		c2.873,0,5.211-2.338,5.211-5.211s-2.338-5.211-5.211-5.211s-5.211,2.338-5.211,5.211S82.25,84.047,85.123,84.047z M101.996,52.344
-		c2.873,0,5.209-2.338,5.209-5.211s-2.336-5.211-5.209-5.211c-2.875,0-5.211,2.338-5.211,5.211S99.121,52.344,101.996,52.344z
-		 M91.89,44.44c2.873,0,5.211-2.336,5.211-5.211c0-2.873-2.338-5.209-5.211-5.209s-5.211,2.336-5.211,5.209
-		C86.679,42.104,89.017,44.44,91.89,44.44z M104.218,28.901c-2.873,0-5.211,2.336-5.211,5.209c0,2.875,2.338,5.211,5.211,5.211
-		s5.211-2.336,5.211-5.211C109.429,31.237,107.091,28.901,104.218,28.901z M146.587,32.854c2.873,0,5.211-2.336,5.211-5.211
-		c0-2.873-2.338-5.209-5.211-5.209s-5.211,2.336-5.211,5.209C141.376,30.518,143.714,32.854,146.587,32.854z M159.386,34.231
-		c2.873,0,5.211-2.336,5.211-5.209c0-2.875-2.338-5.211-5.211-5.211c-2.875,0-5.213,2.336-5.213,5.211
-		C154.173,31.895,156.511,34.231,159.386,34.231z M172.117,37.331c2.873,0,5.211-2.338,5.211-5.211s-2.338-5.211-5.211-5.211
-		c-2.875,0-5.213,2.338-5.213,5.211S169.242,37.331,172.117,37.331z M184.509,41.708c2.873,0,5.211-2.336,5.211-5.209
-		s-2.338-5.211-5.211-5.211s-5.211,2.338-5.211,5.211S181.636,41.708,184.509,41.708z M224.564,95.594
-		c0,2.873,2.338,5.211,5.211,5.211s5.211-2.338,5.211-5.211s-2.338-5.211-5.211-5.211S224.564,92.721,224.564,95.594z
-		 M235.492,88.743c2.875,0,5.213-2.338,5.213-5.211s-2.338-5.209-5.213-5.209c-2.873,0-5.211,2.336-5.211,5.209
-		S232.619,88.743,235.492,88.743z M244.48,98.918c2.873,0,5.211-2.336,5.211-5.209c0-2.875-2.338-5.211-5.211-5.211
-		c-2.875,0-5.211,2.336-5.211,5.211C239.269,96.583,241.605,98.918,244.48,98.918z M238.998,100.176
-		c-2.873,0-5.211,2.336-5.211,5.209s2.338,5.211,5.211,5.211s5.211-2.338,5.211-5.211S241.871,100.176,238.998,100.176z
-		 M236.32,119.141c0,2.875,2.338,5.213,5.213,5.213c2.873,0,5.211-2.338,5.211-5.213c0-2.873-2.338-5.209-5.211-5.209
-		C238.658,113.932,236.32,116.268,236.32,119.141z M245.779,110.471c0,2.875,2.338,5.211,5.211,5.211
-		c2.875,0,5.213-2.336,5.213-5.211c0-2.873-2.338-5.209-5.213-5.209C248.117,105.262,245.779,107.598,245.779,110.471z
-		 M212.232,141.338c0,2.873,2.338,5.211,5.211,5.211s5.211-2.338,5.211-5.211s-2.338-5.209-5.211-5.209
-		S212.232,138.465,212.232,141.338z M80.71,106.133c2.873,0,5.209-2.336,5.209-5.209s-2.336-5.211-5.209-5.211
-		c-2.875,0-5.211,2.338-5.211,5.211S77.835,106.133,80.71,106.133z M89.152,116.014c2.873,0,5.211-2.338,5.211-5.211
-		s-2.338-5.211-5.211-5.211s-5.209,2.338-5.209,5.211S86.279,116.014,89.152,116.014z M89.152,85.924
-		c-2.873,0-5.209,2.336-5.209,5.209s2.336,5.211,5.209,5.211s5.211-2.338,5.211-5.211S92.025,85.924,89.152,85.924z M67.912,93.961
-		c-2.873,0-5.211,2.338-5.211,5.211s2.338,5.211,5.211,5.211s5.211-2.338,5.211-5.211S70.785,93.961,67.912,93.961z M32.412,111.551
-		c2.873,0,5.211-2.336,5.211-5.209s-2.338-5.211-5.211-5.211s-5.211,2.338-5.211,5.211S29.539,111.551,32.412,111.551z
-		 M37.734,99.848c2.873,0,5.209-2.338,5.209-5.211s-2.336-5.211-5.209-5.211c-2.875,0-5.211,2.338-5.211,5.211
-		S34.859,99.848,37.734,99.848z M70.093,202.477c0-7.932-6.453-14.387-14.385-14.387s-14.383,6.455-14.383,14.387
-		s6.451,14.387,14.383,14.387S70.093,210.409,70.093,202.477z M92.994,225.245c0-7.932-6.451-14.387-14.383-14.387
-		s-14.385,6.455-14.385,14.387s6.453,14.387,14.385,14.387S92.994,233.176,92.994,225.245z M126.437,231.067
-		c-7.932,0-14.385,6.455-14.385,14.387c0,7.93,6.453,14.385,14.385,14.385s14.383-6.455,14.383-14.385
-		C140.82,237.522,134.369,231.067,126.437,231.067z M155.265,217.057c-7.93,0-14.383,6.453-14.383,14.383
-		c0,7.934,6.453,14.387,14.383,14.387c7.932,0,14.387-6.453,14.387-14.387C169.652,223.51,163.197,217.057,155.265,217.057z
-		 M219.335,180.42c7.932,0,14.385-6.453,14.385-14.383c0-7.932-6.453-14.387-14.385-14.387s-14.385,6.455-14.385,14.387
-		C204.951,173.967,211.404,180.42,219.335,180.42z M76.13,199.612c2.873,0,5.209-2.338,5.209-5.211s-2.336-5.213-5.209-5.213
-		c-2.875,0-5.211,2.34-5.211,5.213S73.255,199.612,76.13,199.612z M85.123,209.393c2.873,0,5.211-2.338,5.211-5.209
-		c0-2.873-2.338-5.213-5.211-5.213s-5.211,2.34-5.211,5.213C79.912,207.055,82.25,209.393,85.123,209.393z M107.205,235.887
-		c0-2.873-2.336-5.213-5.209-5.213c-2.875,0-5.211,2.34-5.211,5.213s2.336,5.211,5.211,5.211
-		C104.869,241.098,107.205,238.76,107.205,235.887z M91.89,238.579c-2.873,0-5.211,2.338-5.211,5.211s2.338,5.213,5.211,5.213
-		s5.211-2.34,5.211-5.213S94.763,238.579,91.89,238.579z M104.218,243.696c-2.873,0-5.211,2.34-5.211,5.215
-		c0,2.873,2.338,5.211,5.211,5.211s5.211-2.338,5.211-5.211C109.429,246.036,107.091,243.696,104.218,243.696z M146.587,250.163
-		c-2.873,0-5.211,2.34-5.211,5.215c0,2.873,2.338,5.211,5.211,5.211s5.211-2.338,5.211-5.211
-		C151.798,252.502,149.46,250.163,146.587,250.163z M159.386,248.788c-2.875,0-5.213,2.34-5.213,5.213
-		c0,2.871,2.338,5.209,5.213,5.209c2.873,0,5.211-2.338,5.211-5.209C164.597,251.127,162.259,248.788,159.386,248.788z
-		 M172.117,245.69c-2.875,0-5.213,2.336-5.213,5.211c0,2.873,2.338,5.211,5.213,5.211c2.873,0,5.211-2.338,5.211-5.211
-		C177.328,248.026,174.99,245.69,172.117,245.69z M184.509,241.313c-2.873,0-5.211,2.338-5.211,5.209
-		c0,2.873,2.338,5.213,5.211,5.213s5.213-2.34,5.213-5.213C189.722,243.651,187.382,241.313,184.509,241.313z M234.986,187.426
-		c0-2.873-2.338-5.211-5.211-5.211s-5.211,2.338-5.211,5.211s2.338,5.211,5.211,5.211S234.986,190.299,234.986,187.426z
-		 M235.492,194.276c-2.873,0-5.211,2.338-5.211,5.211s2.338,5.213,5.211,5.213c2.875,0,5.213-2.34,5.213-5.213
-		S238.367,194.276,235.492,194.276z M244.48,184.1c-2.875,0-5.211,2.338-5.211,5.211s2.336,5.213,5.211,5.213
-		c2.873,0,5.211-2.34,5.211-5.213S247.353,184.1,244.48,184.1z M233.787,177.635c0,2.873,2.338,5.211,5.211,5.211
-		s5.211-2.338,5.211-5.211s-2.338-5.213-5.211-5.213S233.787,174.762,233.787,177.635z M246.744,163.877
-		c0-2.873-2.338-5.211-5.211-5.211c-2.875,0-5.213,2.338-5.213,5.211s2.338,5.211,5.213,5.211
-		C244.406,169.088,246.744,166.75,246.744,163.877z M250.99,167.336c-2.873,0-5.211,2.338-5.211,5.213
-		c0,2.873,2.338,5.211,5.211,5.211c2.875,0,5.213-2.338,5.213-5.211C256.203,169.674,253.865,167.336,250.99,167.336z M80.71,187.307
-		c2.873,0,5.209-2.338,5.209-5.211s-2.336-5.211-5.209-5.211c-2.875,0-5.211,2.338-5.211,5.211S77.835,187.307,80.71,187.307z
-		 M89.152,167.004c-2.873,0-5.209,2.34-5.209,5.213s2.336,5.209,5.209,5.209s5.211-2.336,5.211-5.209S92.025,167.004,89.152,167.004z
-		 M94.363,191.885c0-2.873-2.338-5.211-5.211-5.211s-5.209,2.338-5.209,5.211s2.336,5.211,5.209,5.211S94.363,194.758,94.363,191.885
-		z M67.912,178.637c-2.873,0-5.211,2.336-5.211,5.211c0,2.873,2.338,5.211,5.211,5.211s5.211-2.338,5.211-5.211
-		C73.123,180.973,70.785,178.637,67.912,178.637z M37.625,176.678c0-2.875-2.338-5.211-5.211-5.211c-2.875,0-5.213,2.336-5.213,5.211
-		c0,2.873,2.338,5.211,5.213,5.211C35.287,181.889,37.625,179.551,37.625,176.678z M42.945,188.383c0-2.873-2.336-5.211-5.209-5.211
-		c-2.875,0-5.213,2.338-5.213,5.211s2.338,5.211,5.213,5.211C40.609,193.594,42.945,191.256,42.945,188.383z"
-          />
-          <g class="logo">
-            <path
-              fill="none"
-              stroke="#26A7DF"
-              stroke-width="2.5"
-              stroke-miterlimit="10"
-              d="M262.552,141.338
-			c0-67.061-54.365-121.426-121.426-121.426c-67.064,0-121.426,54.365-121.426,121.426c0,67.064,54.361,121.426,121.426,121.426
-			C208.187,262.764,262.552,208.403,262.552,141.338z"
-            />
-            <circle
-              fill="none"
-              stroke="#26A7DF"
-              stroke-width="2.5"
-              stroke-miterlimit="10"
-              cx="122.607"
-              cy="80.139"
-              r="25.865"
-            />
-            <circle
-              fill="none"
-              stroke="#26A7DF"
-              stroke-width="2.5"
-              stroke-miterlimit="10"
-              cx="122.607"
-              cy="202.54"
-              r="25.865"
-            />
+        />
+        <div class="info-text">
+          <h1>Grain-Nest</h1>
+          <p class="info-version">v<span id="package-version"></span></p>
 
-            <line
-              fill="none"
-              stroke="#26A7DF"
-              stroke-width="2.5"
-              stroke-miterlimit="10"
-              x1="148.472"
-              y1="80.139"
-              x2="148.472"
-              y2="202.54"
-            />
+          <p>
+            Pattern nesting for dressmaking: lays out sewing pattern pieces on
+            fabric as tightly as it can, keeping each piece on its grain line.
+          </p>
 
-            <rect
-              x="127.33"
-              y="67.287"
-              transform="matrix(0.7071 -0.7071 0.7071 0.7071 -33.3954 140.7444)"
-              fill="none"
-              stroke="#26A7DF"
-              stroke-width="2.5"
-              stroke-linecap="round"
-              stroke-linejoin="round"
-              stroke-miterlimit="10"
-              width="51.732"
-              height="86.793"
-            />
+          <h2>Built on</h2>
+          <p>
+            Grain-Nest is a fork of
+            <a
+              href="https://github.com/deepnest-next/deepnest"
+              target="_blank"
+              tabindex="-1"
+              >deepnest-next</a
+            >, which grew out of Jack Qiao's
+            <a
+              href="https://github.com/Jack000/SVGnest"
+              target="_blank"
+              tabindex="-1"
+              >SVGnest</a
+            >
+            and
+            <a
+              href="https://github.com/Jack000/Deepnest"
+              target="_blank"
+              tabindex="-1"
+              >Deepnest</a
+            >. The nesting engine (how the pieces are fitted together) comes
+            from those projects. Grain-Nest adds what dressmaking needs: grain
+            lines, cut on fold, mirrored pieces, nap, seam allowances and cut
+            lists.
+          </p>
 
-            <rect
-              x="127.269"
-              y="128.699"
-              transform="matrix(0.7071 0.7071 -0.7071 0.7071 166.5478 -57.8764)"
-              fill="none"
-              stroke="#26A7DF"
-              stroke-width="2.5"
-              stroke-linecap="round"
-              stroke-linejoin="round"
-              stroke-miterlimit="10"
-              width="51.731"
-              height="86.792"
-            />
-            <line
-              fill="none"
-              stroke="#26A7DF"
-              stroke-width="2.5"
-              stroke-miterlimit="10"
-              x1="96.32"
-              y1="202.198"
-              x2="96.32"
-              y2="79.799"
-            />
-            <circle
-              fill="none"
-              stroke="#26A7DF"
-              stroke-width="2.5"
-              stroke-miterlimit="10"
-              cx="183.807"
-              cy="141.338"
-              r="25.866"
-            />
-          </g>
-        </svg>
-        <h1
-          style="
-            margin: 0 0 0.2em 0;
-            font-size: 3em;
-            color: #26a9e0;
-            text-align: center;
-          "
-        >
-          deepnest
-        </h1>
+          <h2>Source code</h2>
+          <p>
+            <a
+              href="https://github.com/UMhwoxhmE/Grain-Nest"
+              target="_blank"
+              tabindex="-1"
+              >github.com/UMhwoxhmE/Grain-Nest</a
+            >
+          </p>
 
-        <p>v<span id="package-version"></span></p>
-        <p>
-          Visit our website:
-          <a href="https://www.deepnest.net" target="_blank" tabindex="-1"
-            >www.deepnest.net</a
-          >.
-        </p>
-        <p>
-          If you use this software regularly, you should consider supporting us!
-          We are on
-          <a
-            href="https://patreon.com/deepnest_next?utm_medium=clipboard_copy&utm_source=copyLink&utm_campaign=creatorshare_fan&utm_content=join_link"
-            target="_blank"
-            tabindex="-1"
-            >https://patreon.com/deepnest_next</a
-          >.
-        </p>
-
-        <p>
-          Deepnest is a free and open-source nesting software, but we need your
-          support to keep it that way. <br />
-          We are committed to keeping deepnest-next free for everyone, but we
-          need your help to do that. <br />
-          If you use deepnest-next regularly, please consider supporting us on
-          Patreon or Github. Your support will <br />
-          help us to continue to develop and improve deepnest-next, and to keep
-          it free for everyone.
-        </p>
+          <h2>Licences</h2>
+          <p>Grain-Nest is open source. It is made of parts with these licences:</p>
+          <ul class="info-licences">
+            <li>
+              <strong>MIT</strong> — Copyright © 2015 Jack Qiao; © 2023–2024
+              Deepnest Contributors; © 2024 deepnest-next Contributors.
+            </li>
+            <li>
+              <strong>GNU GPL v3</strong> — the Deepnest nesting module
+              (<code>main/deepnest.js</code>).
+            </li>
+            <li>
+              <strong>Boost Software License 1.0</strong> — Clipper © Angus
+              Johnson; Minkowski code © Intel Corporation and Jack Qiao;
+              Boost.Polygon © Glen Joseph Fernandes.
+            </li>
+            <li>
+              <strong>Other libraries</strong> (Ractive, interact.js © Taye
+              Adeyemi, FileSaver.js © Eli Grey and others) keep their licence
+              notices in their own files.
+            </li>
+          </ul>
+          <p class="info-small">
+            The full licence texts are in the <code>LICENSE</code> and
+            <code>LICENSES.md</code> files inside the app and in the source
+            code. The software is provided “as is”, without warranty of any
+            kind.
+          </p>
+        </div>
       </div>
     </div>
   </body>

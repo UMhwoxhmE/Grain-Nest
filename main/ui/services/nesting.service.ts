@@ -40,7 +40,9 @@ export type DisplayCallback = () => void;
 /**
  * Progress callback function type
  */
-export type ProgressCallback = ((progress: { index: number; progress: number }) => void) | null;
+export type ProgressCallback =
+  | ((progress: { index: number; progress: number }) => void)
+  | null;
 
 /**
  * Display nest function type
@@ -446,6 +448,22 @@ export class NestingService {
       return false;
     }
 
+    // v1.2.0: every sheet unticked.
+    if (!this.deepNest.parts.some((p) => p.sheet && !p.excluded)) {
+      message(
+        'No sheets are ticked for this nest — tick a sheet in the "Nest" column, or set its Fabric to match the "Nest for" job.',
+      );
+      return false;
+    }
+
+    // phase-r8a: every piece excluded (Nest tick boxes / "Nest for" job).
+    if (!this.deepNest.parts.some((p) => !p.sheet && !p.excluded)) {
+      message(
+        'No pieces are included in this nest — tick some in the "Nest" column or pick a different "Nest for" job.',
+      );
+      return false;
+    }
+
     this.isStarting = true;
 
     try {
@@ -670,7 +688,7 @@ export class NestingService {
    * @returns New NestingService instance
    */
   static create(
-    options?: ConstructorParameters<typeof NestingService>[0]
+    options?: ConstructorParameters<typeof NestingService>[0],
   ): NestingService {
     return new NestingService(options);
   }
@@ -682,7 +700,7 @@ export class NestingService {
  * @returns New NestingService instance
  */
 export function createNestingService(
-  options?: ConstructorParameters<typeof NestingService>[0]
+  options?: ConstructorParameters<typeof NestingService>[0],
 ): NestingService {
   return NestingService.create(options);
 }

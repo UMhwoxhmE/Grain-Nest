@@ -159,10 +159,126 @@ export type Part = {
   quantity: number;
   /** Source filename or null for programmatically created parts */
   filename: string | null;
+  /**
+   * §9.3.12: human-friendly piece name (front, back, sleeve, …).
+   * Auto-detected from the source SVG on import (inkscape:label /
+   * <title> / meaningful id) when present, otherwise editable by the
+   * user in the parts table. Used by the cut-list to itemise pieces;
+   * falls back to `filename` when undefined.
+   */
+  name?: string;
+  /**
+   * v1.1.1: position of this part among the parts its import produced
+   * (0-based, set at import; not on sheets or mirror copies). Saving uses it
+   * to record each piece's place in the file however the list is sorted.
+   */
+  importPartIndex?: number;
+  /** v1.3.0: the import this part came from (in-memory only). */
+  importRef?: ImportedFile;
+  /**
+   * v1.2.0: sheets only — the fabric this sheet is for ("main", "fused",
+   * "interfacing", "lining", "ribbing"; "" or undefined = not set). "Nest
+   * for" ticks the sheets whose fabric matches the job.
+   */
+  fabric?: string;
   /** True if this part is a sheet (bin) rather than a piece to nest */
   sheet?: boolean;
   /** True if currently selected in the UI */
   selected?: boolean;
+  /**
+   * Round 8 (phase-r8a): true when the piece is left out of the next nest
+   * without being deleted — set by the per-row "Nest" tick box, Bulk
+   * Include/Exclude, or a "Nest for" job (main fabric, lining, …; see
+   * main/ui/utils/nest-jobs.ts). Excluded pieces are sent to the engine
+   * with quantity 0 so part indices stay stable. v1.2.0: sheets can be
+   * excluded too (their own Nest tick box, or a "Nest for" job).
+   */
+  excluded?: boolean;
+  /**
+   * Grain-direction constraint chosen for this part. Translated into
+   * `allowedRotations` at nest time.
+   */
+  grainRule?: "free" | "lock" | "flipped" | "bias" | "custom";
+  /**
+   * Computed rotation set the GA samples from (degrees, 0-359). When
+   * undefined or empty, the GA falls back to the global
+   * `config.rotations`-derived set. Set on a per-piece basis from
+   * `grainRule` before IPC; not normally written by hand.
+   */
+  allowedRotations?: number[];
+  /**
+   * Angle of the detected grain line in SVG coordinates (degrees, folded
+   * to [0, 180)). Used as a rotation offset so that "Lock to grain"
+   * actually aligns the grain horizontal — see grainRuleToRotations in
+   * main/deepnest.js. Undefined when no grain has been associated with
+   * this part.
+   */
+  grainAngle?: number;
+  /**
+   * Provenance of the grain information:
+   * - "detected": found via SVG import (Phase 3)
+   * - "manual": user clicked two points (Phase 4)
+   * - "manual-required": no grain found, awaiting user input
+   */
+  grainSource?: "detected" | "manual" | "manual-required";
+  /**
+   * Phase R8-C: which end of the grain line is the top of the piece.
+   * `grainAngle` is folded to [0, 180), so it says nothing about up/down;
+   * by default the top is the end of the grain line nearer the top of the
+   * page (for a horizontal grain line, the left end). `topFlip: true`
+   * swaps that, turning the piece end-to-end in the nest. "Lock to grain"
+   * places every piece with its top towards the left (start) of the
+   * fabric. Only meaningful when `grainAngle` is set.
+   */
+  topFlip?: boolean;
+  /**
+   * §9.3.2: true if the user has flipped this piece across its vertical
+   * bounding-box centre. polygontree and grainAngle are stored already
+   * mirrored; the flag exists so render/export paths can compose a
+   * `scale(-1, 1)` transform on the svgelements (which are left in
+   * their original orientation). Toggling the flag a second time
+   * re-mirrors the polygontree (undoing the first flip).
+   */
+  mirror?: boolean;
+  /**
+   * §9.3.3: true on parts created via DeepNest.mirrorCopyPart, used by
+   * the project-file save/load to distinguish synthetic mirror copies
+   * (which share `filename` with their source) from import-origin
+   * parts. Not user-visible; not normally inspected anywhere else.
+   */
+  isMirrorCopy?: boolean;
+  /**
+   * §9.3.2 behaviour 3: true when the piece is "cut on the fold" — its
+   * polygontree has been doubled (the half reflected across `foldLine`
+   * and unioned). The pre-fold half is stashed internally for unfold.
+   */
+  cutOnFold?: boolean;
+  /**
+   * §9.3.2 behaviour 3: the fold line in piece coordinates (a point and
+   * an angle in radians) used to double the piece. Round-tripped in
+   * `.gnp` so a loaded project can re-fold.
+   */
+  foldLine?: { x0: number; y0: number; ang: number };
+  /**
+   * §9.3.9: per-piece seam allowance in **millimetres** (canonical: stored
+   * in mm so recalibrating the scale or toggling display units never
+   * silently changes the real-world allowance). Undefined or 0 means no
+   * sew line is drawn for this piece. At export the value is converted to
+   * SVG units via the current scale and the piece's `polygontree` is inset
+   * inward by it onto a dashed sew-line layer.
+   */
+  seamAllowance?: number;
+  /**
+   * §9.0.1 R6-B: stable per-session identity. `grainnestId` is stamped on a
+   * part the first time something needs to reference it (currently:
+   * becoming the source of a mirror copy); `mirrorOfId` on a copy records
+   * its source's id. Used at SAVE time to record exactly which part a
+   * mirror copy mirrors — replacing the filename-recency guess that
+   * collapsed every bulk-made copy onto the last original. Session-scoped
+   * plain numbers; never written to the `.gnp` themselves.
+   */
+  grainnestId?: number;
+  mirrorOfId?: number;
 };
 
 /**
@@ -174,14 +290,19 @@ export interface ConfigObject {
    * Get configuration value(s)
    * @param key Optional key to get specific value; if omitted, returns full config
    */
-  getSync<K extends keyof DeepNestConfig>(key?: K): K extends keyof DeepNestConfig ? DeepNestConfig[K] : DeepNestConfig;
+  getSync<K extends keyof DeepNestConfig>(
+    key?: K,
+  ): K extends keyof DeepNestConfig ? DeepNestConfig[K] : DeepNestConfig;
 
   /**
    * Set configuration value(s)
    * @param keyOrObject Key to set, or object with multiple values
    * @param value Value to set (when keyOrObject is a string)
    */
-  setSync<K extends keyof DeepNestConfig>(keyOrObject: K | Partial<DeepNestConfig>, value?: DeepNestConfig[K]): void;
+  setSync<K extends keyof DeepNestConfig>(
+    keyOrObject: K | Partial<DeepNestConfig>,
+    value?: DeepNestConfig[K],
+  ): void;
 
   /**
    * Reset all configuration to default values
@@ -200,6 +321,27 @@ export interface DeepNestInstance {
   nests: NestingResult[];
   /** Whether nesting is currently running */
   working: boolean;
+  /**
+   * §9.3.4 directional-print / nap toggle. See main/ui/types/index.ts
+   * for the runtime-side definition.
+   */
+  /** v1.3.0: woven or knit project (sets the default seam allowance). */
+  fabricType: "woven" | "knit";
+  /** v1.3.0: default seam allowance (mm) for a woven or knit project. */
+  defaultSeamMm(fabricType: "woven" | "knit"): number;
+  /**
+   * v1.3.0: switch woven/knit; pieces on the old default seam move to the
+   * new one. Returns how many changed.
+   */
+  setFabricType(fabricType: "woven" | "knit"): number;
+  nap: boolean;
+  /**
+   * §9.3.10 warp direction — picks which bin axis runs along the
+   * fabric's warp. Affects grain-locked rotation target and which
+   * axis the cut-list (and future preset/auto-fit features) treat
+   * as "fabric length". Default 'horizontal' per brief §3.3.
+   */
+  warpDirection: "horizontal" | "vertical";
 
   /**
    * Import an SVG file
@@ -215,7 +357,7 @@ export interface DeepNestInstance {
     dirpath: string | null,
     svgstring: string,
     scalingFactor?: number | null,
-    dxfFlag?: boolean
+    dxfFlag?: boolean,
   ): Part[];
 
   /**
@@ -231,8 +373,10 @@ export interface DeepNestInstance {
    * @param displayCallback Called when new placement is ready
    */
   start(
-    progressCallback: ((progress: { index: number; progress: number }) => void) | null,
-    displayCallback: (() => void) | null
+    progressCallback:
+      | ((progress: { index: number; progress: number }) => void)
+      | null,
+    displayCallback: (() => void) | null,
   ): void;
 
   /**
@@ -244,6 +388,13 @@ export interface DeepNestInstance {
    * Reset nesting state
    */
   reset(): void;
+
+  /**
+   * §9.3.6: trim the used sheets down to the placed-piece extent on
+   * the currently-selected nest, then clear nests. See
+   * main/ui/types/index.ts for the runtime-side definition.
+   */
+  trimSheetsToMinLength(): number;
 }
 
 /**
@@ -259,7 +410,12 @@ export interface RactiveInstance {
  */
 export interface SvgParserInstance {
   /** Load and parse SVG content */
-  load(dirpath: string | null, svgstring: string, scale: number, scalingFactor?: number | null): SVGSVGElement;
+  load(
+    dirpath: string | null,
+    svgstring: string,
+    scale: number,
+    scalingFactor?: number | null,
+  ): SVGSVGElement;
   /** Clean input SVG for nesting */
   cleanInput(dxfFlag?: boolean): SVGSVGElement;
   /** Supported polygon element types */
