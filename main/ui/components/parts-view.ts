@@ -1284,20 +1284,78 @@ export class PartsViewService {
           : `Mark the grain line for ${label}: click its bottom end, then its top end. Press Esc to cancel.`;
       banner.classList.add("active");
     }
-    // The preview has to show this piece's file for a fold click.
-    if (kind === "fold") this.showImportFor(partIndex);
+    // The preview has to show this piece's file for a fold click, zoomed
+    // in on the piece so its edge is easy to hit.
+    if (kind === "fold") {
+      this.showImportFor(partIndex);
+      this.zoomPreviewTo(partIndex);
+    }
   }
 
   /** v1.5.0: switch the import preview to the file a piece came from. */
   private showImportFor(partIndex: number): void {
     const importIdx = this.importIndexFor(partIndex);
     if (importIdx === -1) return;
+    // v1.6.0: redrawing the preview drops its pan/zoom, so only redraw
+    // when it has to change file, and put the pan/zoom back afterwards.
+    if (this.deepNest.imports[importIdx].selected) return;
     this.deepNest.imports.forEach((im, i) => (im.selected = i === importIdx));
     if (this.ractive) {
       (this.ractive as unknown as { update(k?: string): void }).update(
         "imports",
       );
     }
+    this.applyZoom();
+  }
+
+  /**
+   * v1.6.0: zoom the import preview in on one piece. The preview is a
+   * copy of the imported file, so the piece's shapes are found there by
+   * their position in the file.
+   */
+  private zoomPreviewTo(partIndex: number): void {
+    const importIdx = this.importIndexFor(partIndex);
+    const imp = this.deepNest.imports[importIdx];
+    const part = this.deepNest.parts[partIndex];
+    const liveSvg = document
+      .getElementById(`import-${importIdx}`)
+      ?.querySelector("svg") as SVGSVGElement | null;
+    if (!imp?.zoom || !part || !liveSvg) return;
+    const source = Array.from(imp.svg.querySelectorAll("*"));
+    const shown = Array.from(liveSvg.querySelectorAll("*")).filter(
+      (e) => !e.classList.contains("svg-pan-zoom_viewport"),
+    );
+    if (source.length !== shown.length) return;
+    const els = (part.svgelements || [])
+      .map((e) => shown[source.indexOf(e as Element)])
+      .filter((e): e is Element => !!e);
+    const bounds = () => {
+      const r = els.map((e) => e.getBoundingClientRect());
+      const left = Math.min(...r.map((b) => b.left));
+      const top = Math.min(...r.map((b) => b.top));
+      const right = Math.max(...r.map((b) => b.right));
+      const bottom = Math.max(...r.map((b) => b.bottom));
+      return {
+        cx: (left + right) / 2,
+        cy: (top + bottom) / 2,
+        w: right - left,
+        h: bottom - top,
+      };
+    };
+    if (els.length === 0) return;
+    const view = liveSvg.getBoundingClientRect();
+    const b = bounds();
+    if (!(b.w > 0 || b.h > 0)) return;
+    const scale =
+      0.8 *
+      Math.min(view.width / Math.max(b.w, 1), view.height / Math.max(b.h, 1));
+    imp.zoom.zoomAtPointBy(scale, { x: b.cx - view.left, y: b.cy - view.top });
+    // Then centre it.
+    const a = bounds();
+    imp.zoom.panBy({
+      x: view.left + view.width / 2 - a.cx,
+      y: view.top + view.height / 2 - a.cy,
+    });
   }
 
   private importIndexFor(partIndex: number): number {

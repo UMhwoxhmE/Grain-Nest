@@ -2183,6 +2183,35 @@ body.dark-mode #presetName {
 #parts table#partslist td.rowactions {
   white-space: nowrap;
 }
+/* v1.6.0: the Actions column stays pinned to the right edge of the parts
+   list (beside its resize bar), its buttons in two neat columns; when the
+   panel is narrow the other columns scroll underneath it instead of the
+   buttons sliding out of sight. */
+#parts table#partslist th:last-child,
+#parts table#partslist td.rowactions {
+  position: sticky;
+  right: 0;
+  z-index: 2;
+  width: 1%;
+  background-color: var(--table-bg);
+  box-shadow: -6px 0 6px -6px rgba(0, 0, 0, 0.35);
+}
+#parts table#partslist tbody tr:hover td.rowactions {
+  background-color: var(--table-hover);
+}
+#parts table#partslist tbody tr.active td.rowactions {
+  background-color: var(--table-active);
+}
+#parts table#partslist td.rowactions .rowbuttons {
+  display: grid;
+  grid-template-columns: max-content max-content;
+  width: max-content;
+  gap: 3px 4px;
+}
+#parts table#partslist td.rowactions .rowbuttons a.mirror {
+  margin: 0;
+  text-align: center;
+}
 #parts table#partslist td.rowactions a.mirror {
   display: inline-block;
   margin: 2px 4px 2px 0;
@@ -2248,7 +2277,8 @@ li.progress circle.bar {
 }
 #parts table tbody tr.active td,
 #parts table tbody tr.active td select,
-#parts table tbody tr.active td a {
+#parts table tbody tr.active td a,
+#parts table tbody tr.active td .mirror {
   color: #fff;
 }
 #parts table tbody tr td .markgrain {

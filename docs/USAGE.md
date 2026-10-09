@@ -112,7 +112,9 @@ good one to open in Inkscape and copy.
 1. **Draw or check the cutting line.** It must be one closed shape (the end
    joined back to the start). Notches can be part of the same path as little
    extra sub-paths (for example drawn separately and then joined with
-   **Path → Combine**); they're kept and drawn on the exported layout. Pieces
+   **Path → Combine**), or small triangles or slits cut into the outline
+   itself, as many commercial patterns draw them; either way they're kept and
+   drawn on the exported layout. Pieces
    are always nested as solid shapes, so nothing is ever tucked inside another
    piece's notches or holes.
 2. **Draw the grain line.** Use the pen (Bézier) tool, click once at one end,
@@ -333,9 +335,8 @@ If a piece is cut on the fold but its grain line isn't drawn on the fold edge,
 tell Grain-Nest which edge is the fold:
 
 1. Click **Mark fold** in the piece's **Actions** column. The preview on the
-   right switches to the file the piece came from.
-2. Click on the piece's **straight fold edge** in that preview (zoom in first if
-   it's small).
+   right switches to the file the piece came from and zooms in on the piece.
+2. Click on the piece's **straight fold edge** in that preview.
 3. The edge nearest your click becomes the fold, and the piece is cut on the
    fold straight away — its picture doubles.
 
@@ -470,7 +471,9 @@ set by hand. Change the two defaults in **Settings → Seam allowance**.
 Notes:
 
 - The allowance is per piece, so a hem can have more than the side seams.
-- The sew line follows the piece's outline; notches are ignored.
+- The sew line follows the piece's outline and ignores notches: separate
+  notch lines, and notch triangles or slits up to 12 mm cut into the outline,
+  are stitched straight past.
 - It's set *inwards*, assuming your outline is the **cutting** line (with seam
   allowance included).
 - It only appears in the exported SVG, not in the pictures on screen.
@@ -533,6 +536,11 @@ Each piece's buttons are in the last column: **Flip top** (only when the piece
 has a grain line), **Mirror**, **Mirror copy**, **Cut on fold** / **Unfold** and
 **Mark fold** (hidden while the piece is cut on the fold). Clicking a button,
 box or drop-down in a row doesn't select the row.
+
+The Actions column stays pinned to the right-hand edge of the parts list, so
+the buttons are always in view: if the list is narrower than its columns (you
+dragged its right edge in, or the window is small), the other columns scroll
+sideways underneath it.
 
 ### Selecting rows
 
@@ -659,12 +667,12 @@ Every line is the same width — **2 mm** by default — and the colours come fr
 | Cutting line (and piece names, calibration square) | aubergine `#3b1f6e` |
 | Sew line (dashed) | moss green `#4f8a26` |
 | Grain line (solid) | moss green `#4f8a26` |
-| Sheet border | white `#ffffff` |
+| Sheet border | cyan `#00ffff` |
 
-A white border shows up well when projected onto fabric, but it's invisible on
-Inkscape's white page — select it in the Layers and Objects panel if you need
-to find it. If your projection looks better the other way round, Pattern
-Projector's **Invert colours** swaps the colours.
+The border is cyan so it shows up both on a white page and when Pattern
+Projector inverts the colours for projecting onto fabric (a white border
+vanished in one or the other). It's drawn just inside the edge of the sheet, so
+the whole line is on the page.
 
 ### Checking the scale
 

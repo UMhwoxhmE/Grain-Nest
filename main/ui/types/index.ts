@@ -80,6 +80,11 @@ export interface SvgPanZoomInstance {
   zoomOut(): SvgPanZoomInstance;
   resetZoom(): SvgPanZoomInstance;
   resetPan(): SvgPanZoomInstance;
+  zoomAtPointBy(
+    scale: number,
+    point: { x: number; y: number },
+  ): SvgPanZoomInstance;
+  panBy(point: { x: number; y: number }): SvgPanZoomInstance;
 }
 
 /**

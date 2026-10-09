@@ -278,7 +278,7 @@
           								<a href="#" class="markgrain" on-click="markgrain:{{this}}">{{ grainSource === 'manual-required' ? 'Mark grain' : 'Re-mark' }}</a>
           							{{/if}}
           						</td>
-          						<td class="rowactions">
+          						<td class="rowactions"><div class="rowbuttons">
           							{{#if !sheet && typeof grainAngle === "number"}}
           								<a href="#" class="mirror fliptop" on-click="fliptop:{{this}}" title="Turn the piece end-to-end: the arrow in the picture shows its top, which goes to the start (left) of the fabric">Flip top</a>
           							{{/if}}
@@ -290,7 +290,7 @@
           									<a href="#" class="mirror markfold" on-click="markfold:{{this}}" title="Click the piece's fold edge in the preview on the right; the piece is then cut on the fold along that edge">Mark fold</a>
           								{{/if}}
           							{{/if}}
-          						</td>
+          						</div></td>
           					</tr>
           					{{/if}}
           				{{/each}}
@@ -542,7 +542,7 @@
               <input
                 id="exportBorderColour"
                 type="color"
-                value="#ffffff"
+                value="#00ffff"
                 data-config="exportBorderColour"
               />
             </dd>

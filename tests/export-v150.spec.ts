@@ -218,6 +218,11 @@ test("SVG export: layers, named piece groups, line styles, names, calibration", 
       borderStyle: styleOf(
         sheetLayer.querySelector("g")!.firstElementChild as Element,
       ),
+      borderX: Number(
+        (
+          sheetLayer.querySelector("g")!.firstElementChild as Element
+        ).getAttribute("x"),
+      ),
       calibration: cal
         ? {
             bottom:
@@ -270,7 +275,10 @@ test("SVG export: layers, named piece groups, line styles, names, calibration", 
     expect(p.grainStyle).not.toContain("stroke-dasharray");
     expect(p.grainStyle).toContain(w);
   }
-  expect(report.borderStyle).toContain("stroke:#ffffff");
+  // v1.6.0: cyan, and half a line width (2 mm = 7.559) inside the sheet
+  // edge so the whole line is on the page.
+  expect(report.borderStyle).toContain("stroke:#00ffff");
+  expect(report.borderX).toBeCloseTo(7.559 / 2, 2);
 
   // The long thin waist tie gets its name turned to run along it.
   const ties = report.pieces.filter((p) => p.label.startsWith("8 Waist Tie"));
@@ -309,7 +317,7 @@ test("Settings: export line width and colours", async () => {
   await expect(mainWindow.locator("#exportSewColour")).toHaveValue("#4f8a26");
   await expect(mainWindow.locator("#exportGrainColour")).toHaveValue("#4f8a26");
   await expect(mainWindow.locator("#exportBorderColour")).toHaveValue(
-    "#ffffff",
+    "#00ffff",
   );
   // Changing them saves them.
   const saved = await mainWindow.evaluate(() => {

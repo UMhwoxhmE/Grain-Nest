@@ -55,13 +55,14 @@ export const DEFAULT_CONFIG: Readonly<UIConfig> = {
   exportScalingBoxSizeInches: 4,
   // v1.5.0: every line in the export is the same width (mm) and the cut,
   // sew and grain lines and the sheet border each have a colour — the
-  // app's aubergine and moss by default, border white (shows up well when
-  // projected).
+  // app's aubergine and moss by default. v1.6.0: the border is cyan — a
+  // white one vanished in Pattern Projector (white page, or inverted to
+  // black), a mid-bright colour shows either way.
   exportLineWidthMm: 2,
   exportCutColour: "#3b1f6e",
   exportSewColour: "#4f8a26",
   exportGrainColour: "#4f8a26",
-  exportBorderColour: "#ffffff",
+  exportBorderColour: "#00ffff",
   // §9.3.9 / phase-5r: default per-piece seam allowance (mm) applied to
   // imported pieces, so sew lines appear by default (testing round 4).
   defaultSeamAllowanceMm: 12,
@@ -69,7 +70,7 @@ export const DEFAULT_CONFIG: Readonly<UIConfig> = {
   // project's Woven / Knit switch (DeepNest.fabricType).
   defaultSeamAllowanceKnitMm: 10,
   // v1.3.0: bumped when saved settings need a one-off migration.
-  settingsRevision: 1,
+  settingsRevision: 2,
 };
 
 /**
@@ -198,7 +199,8 @@ export class ConfigService implements ConfigObject {
    * page keep their harmless value even if an older settings file says
    * otherwise — no laser line-merging, fabric-only scoring, no rough
    * shapes, no SVG normaliser (it strips Inkscape labels), no quantity
-   * from filenames. One-off migration: the sheet border defaults to on.
+   * from filenames. One-off migrations: the sheet border defaults to on
+   * (v1.3.0) and a white border becomes cyan (v1.6.0).
    */
   private retireSettings(saved: Partial<UIConfig>): void {
     this.setConfigValue("mergeLines", false);
@@ -209,6 +211,12 @@ export class ConfigService implements ConfigObject {
     if ((saved.settingsRevision ?? 0) < 1) {
       this.setConfigValue("exportWithSheetBoundboarders", true);
       this.setConfigValue("settingsRevision", 1);
+    }
+    // v1.6.0: the old white border default becomes cyan.
+    if ((saved.settingsRevision ?? 0) < 2) {
+      if ((saved.exportBorderColour ?? "#ffffff").toLowerCase() === "#ffffff")
+        this.setConfigValue("exportBorderColour", "#00ffff");
+      this.setConfigValue("settingsRevision", 2);
     }
   }
 

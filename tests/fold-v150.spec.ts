@@ -67,55 +67,51 @@ test("Mark fold, folded mirror copies, mirror-then-fold, re-mark", async () => {
   // Grain lines read from the file can be re-marked now.
   await expect(rows.first().locator("a.markgrain")).toHaveText("Re-mark");
 
-  // ---- Mark fold: fold a piece along its straight top edge, clicked in
-  // the preview (the first of these pieces that's on screen).
-  await rows.first().locator("a.markfold").click(); // shows the preview
-  await mainWindow.keyboard.press("Escape");
-  const pick = await mainWindow.evaluate(() => {
+  // ---- Mark fold: fold the cuff along its straight top edge, clicked in
+  // the preview. v1.6.0: Mark fold zooms the preview in on the piece, so
+  // its whole outline is on screen and bigger than before.
+  const k = await index("10 Cuff C2R");
+  const width = () =>
+    mainWindow.evaluate(() => {
+      const svg = document.querySelector("#import-0 svg") as SVGSVGElement;
+      const frame = svg.querySelector("path") as SVGGraphicsElement;
+      return frame.getScreenCTM()!.a;
+    });
+  const zoomBefore = await width();
+  const before = await bounds(k);
+  await rows.nth(k).locator("a.markfold").click();
+  await expect(mainWindow.locator("#grainmarker-banner")).toHaveClass(/active/);
+  expect(await width()).toBeGreaterThan(zoomBefore * 2);
+  const pick = await mainWindow.evaluate((k) => {
     const dn = (window as unknown as { DeepNest: DN }).DeepNest;
     const svg = document.querySelector("#import-0 svg") as SVGSVGElement;
     const frame = svg.querySelector("path") as SVGGraphicsElement;
     const r = svg.getBoundingClientRect();
-    for (const name of [
-      "10 Cuff C2R",
-      "5 Pocket C2M C2I",
-      "8 Waist Tie C2M",
-      "INT1 Waistband Interfacing",
-    ]) {
-      const k = dn.parts.findIndex((p) => p.name === name);
-      const b = dn.parts[k].bounds;
-      const p = new DOMPoint(b.x + b.width / 2, b.y).matrixTransform(
-        frame.getScreenCTM()!,
-      );
-      if (
-        p.x > r.left + 2 &&
-        p.x < r.right - 2 &&
-        p.y > r.top + 2 &&
-        p.y < r.bottom - 2
-      )
-        return { k, x: p.x, y: p.y, name };
-    }
-    return null;
-  });
-  expect(
-    pick,
-    "a straight-topped piece is visible in the preview",
-  ).not.toBeNull();
-  const before = await bounds(pick!.k);
-  await rows.nth(pick!.k).locator("a.markfold").click();
-  await expect(mainWindow.locator("#grainmarker-banner")).toHaveClass(/active/);
-  await mainWindow.mouse.click(pick!.x, pick!.y);
+    const b = dn.parts[k].bounds;
+    const ctm = frame.getScreenCTM()!;
+    const corner = (x: number, y: number) =>
+      new DOMPoint(x, y).matrixTransform(ctm);
+    const a = corner(b.x, b.y);
+    const c = corner(b.x + b.width, b.y + b.height);
+    const top = corner(b.x + b.width / 2, b.y);
+    const inView = [a, c].every(
+      (p) => p.x >= r.left && p.x <= r.right && p.y >= r.top && p.y <= r.bottom,
+    );
+    return { x: top.x, y: top.y, inView, name: dn.parts[k].name };
+  }, k);
+  expect(pick.inView, "the whole cuff is in the preview").toBe(true);
+  await mainWindow.mouse.click(pick.x, pick.y);
   await expect(mainWindow.locator("#grainmarker-banner")).not.toHaveClass(
     /active/,
   );
-  const after = await bounds(pick!.k);
+  const after = await bounds(k);
   expect(
     await mainWindow.evaluate(
       (k) =>
         !!(window as unknown as { DeepNest: DN }).DeepNest.parts[k].cutOnFold,
-      pick!.k,
+      k,
     ),
-    `${pick!.name} is cut on the fold`,
+    `${pick.name} is cut on the fold`,
   ).toBe(true);
   expect(after.width).toBeCloseTo(before.width, 0);
   expect(after.height).toBeCloseTo(before.height * 2, 0);

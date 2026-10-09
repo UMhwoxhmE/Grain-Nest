@@ -31,6 +31,9 @@ interface ExportStyle {
 
 type Pt = { x: number; y: number };
 
+/** v1.6.0: notches up to this size (mm) are left out of the sew line. */
+const NOTCH_MAX_MM = 12;
+
 /** The bit of the global SvgParser the export uses. */
 interface SvgParserLike {
   polygonify(element: SVGElement): Pt[];
@@ -106,6 +109,60 @@ function distanceToSegment(a: Pt, b: Pt, p: Pt): number {
     ? Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / len2))
     : 0;
   return Math.hypot(p.x - (a.x + t * dx), p.y - (a.y + t * dy));
+}
+
+/**
+ * v1.6.0: the outline with its notches taken out, for drawing the sew
+ * line. Many patterns (commercial ones, the grading script) cut notches into
+ * the cutting line as small triangles or slits; insetting those made the
+ * sew line spike into the piece. A notch is a vertex whose two neighbours
+ * are both within `maxSize` of it and of each other, on an edge that runs
+ * on straight through it, so real points (collars, corners) are kept.
+ */
+export function withoutNotches(ring: Pt[], maxSize: number): Pt[] {
+  const dist = (a: Pt, b: Pt) => Math.hypot(a.x - b.x, a.y - b.y);
+  const angle = (u: Pt, v: Pt) => {
+    const lu = Math.hypot(u.x, u.y);
+    const lv = Math.hypot(v.x, v.y);
+    if (lu === 0 || lv === 0) return 0;
+    const c = (u.x * v.x + u.y * v.y) / (lu * lv);
+    return (Math.acos(Math.max(-1, Math.min(1, c))) * 180) / Math.PI;
+  };
+  const dir = (a: Pt, b: Pt): Pt => ({ x: b.x - a.x, y: b.y - a.y });
+  const tiny = maxSize / 25;
+  let pts = ring.filter(
+    (p, i) => dist(p, ring[(i + ring.length - 1) % ring.length]) > tiny,
+  );
+  let removed = true;
+  while (removed && pts.length > 5) {
+    removed = false;
+    const n = pts.length;
+    for (let i = 0; i < n; i++) {
+      const before = pts[(i + n - 2) % n];
+      const a = pts[(i + n - 1) % n];
+      const tip = pts[i];
+      const c = pts[(i + 1) % n];
+      const after = pts[(i + 2) % n];
+      if (
+        dist(a, tip) > maxSize ||
+        dist(tip, c) > maxSize ||
+        dist(a, c) > maxSize ||
+        angle(dir(tip, a), dir(tip, c)) > 120
+      )
+        continue;
+      // The edge either side carries on in roughly the same direction.
+      const edgeIn = dir(before, a);
+      const edgeOut = dir(c, after);
+      const across = dist(a, c) > tiny ? dir(a, c) : edgeOut;
+      if (angle(edgeIn, across) > 35 || angle(across, edgeOut) > 35) continue;
+      pts = pts.filter((_, k) => k !== i);
+      // A slit leaves its two base points on top of each other.
+      if (dist(a, c) <= tiny) pts = pts.filter((p) => p !== c);
+      removed = true;
+      break;
+    }
+  }
+  return pts;
 }
 
 function poleOfInaccessibility(ring: Pt[], obstacles: [Pt, Pt][] = []): Pt {
@@ -768,8 +825,10 @@ export class ExportService {
         const border = document.createElementNS(SVG_NS, "g");
         border.setAttribute("id", uniqueId(`border-${sheetIndex + 1}`));
         border.setAttributeNS(INKSCAPE_NS, "inkscape:label", "Sheet border");
+        // v1.6.0: drawn half a line width inside the sheet's edge, so the
+        // whole line is on the page (it used to be half cut off).
         sheetPart.svgelements.forEach((e) => {
-          const node = e.cloneNode(false) as Element;
+          const node = this.insetBorder(e, style.width / 2);
           node.removeAttribute("class");
           node.setAttribute("style", style.line(style.border));
           border.appendChild(node);
@@ -804,7 +863,7 @@ export class ExportService {
       cut: colour(cfg.exportCutColour, "#3b1f6e"),
       sew: colour(cfg.exportSewColour, "#4f8a26"),
       grain: colour(cfg.exportGrainColour, "#4f8a26"),
-      border: colour(cfg.exportBorderColour, "#ffffff"),
+      border: colour(cfg.exportBorderColour, "#00ffff"),
       line: (c: string, dashed = false): string =>
         `fill:none;stroke:${c};stroke-width:${round(width)};` +
         `stroke-linecap:round;stroke-linejoin:round` +
@@ -976,7 +1035,12 @@ export class ExportService {
     if (!this.deepNest || !mm || mm <= 0 || !part.polygontree) return null;
     const svgUnits = toSvgUnits(mm, style.scale, "mm");
     if (!(svgUnits > 0)) return null;
-    const insets = this.deepNest.polygonOffset(part.polygontree, -svgUnits);
+    // Notches in the cutting line aren't sewn, so the sew line ignores them.
+    const outline = withoutNotches(
+      part.polygontree,
+      toSvgUnits(NOTCH_MAX_MM, style.scale, "mm"),
+    );
+    const insets = this.deepNest.polygonOffset(outline, -svgUnits);
     if (!insets || insets.length === 0) {
       console.warn(
         `[grainnest] sew line: ${mm}mm allowance collapses ${part.name || "a piece"} — skipped`,
@@ -988,6 +1052,48 @@ export class ExportService {
     };
     outer.children = insets.slice(1);
     return this.polygonPath(outer, style.line(style.sew, true));
+  }
+
+  /**
+   * v1.6.0: a copy of a sheet outline moved `inset` inwards. A rectangle
+   * (Add sheet) just shrinks; any other shape is offset as a polygon.
+   */
+  private insetBorder(e: Element, inset: number): Element {
+    if (e.tagName.toLowerCase() === "rect" && !e.getAttribute("transform")) {
+      const node = e.cloneNode(false) as Element;
+      const n = (k: string) => Number(e.getAttribute(k)) || 0;
+      const w = n("width") - 2 * inset;
+      const h = n("height") - 2 * inset;
+      if (w > 0 && h > 0) {
+        node.setAttribute("x", round(n("x") + inset));
+        node.setAttribute("y", round(n("y") + inset));
+        node.setAttribute("width", round(w));
+        node.setAttribute("height", round(h));
+      }
+      return node;
+    }
+    const parser = (window as unknown as { SvgParser?: SvgParserLike })
+      .SvgParser;
+    try {
+      const pts = parser?.polygonify(e as SVGElement) || [];
+      const inner =
+        pts.length > 2 && this.deepNest
+          ? this.deepNest.polygonOffset(pts, -inset)[0]
+          : null;
+      if (inner && inner.length > 2) {
+        const path = document.createElementNS(SVG_NS, "path");
+        path.setAttribute(
+          "d",
+          "M " +
+            inner.map((p) => `${round(p.x)} ${round(p.y)}`).join(" L ") +
+            " Z",
+        );
+        return path;
+      }
+    } catch {
+      // fall through to the outline as it is
+    }
+    return e.cloneNode(false) as Element;
   }
 
   /**
