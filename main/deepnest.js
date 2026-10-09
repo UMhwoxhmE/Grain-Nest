@@ -1332,106 +1332,6 @@ export class DeepNest {
     return newtree;
   };
 
-  // §9.3.6 dynamic fabric length — lightweight "trim to min" path.
-  //
-  // For each sheet part referenced by the currently-selected nest,
-  // shrink its length-axis dimension down to the actual maximum
-  // extent of placed pieces on that sheet. Length axis is picked
-  // from this.warpDirection: horizontal → x extent, vertical → y
-  // extent. Bolt-width axis is left alone.
-  //
-  // Mutation is in place so part indices in deepNest.parts stay
-  // stable. Nest results are cleared after the trim — they were
-  // computed against the old larger sheets and any visualisation
-  // depends on the sheet bounds matching. The user re-runs Start
-  // nest to verify the fit still holds at the trimmed size.
-  //
-  // Returns the number of sheets that were trimmed; 0 if no nest
-  // is currently selected, or if the selected nest's placements
-  // are already at minimum.
-  trimSheetsToMinLength() {
-    if (!this.nests || this.nests.length === 0) return 0;
-    var selected = null;
-    for (var i = 0; i < this.nests.length; i++) {
-      if (this.nests[i].selected) {
-        selected = this.nests[i];
-        break;
-      }
-    }
-    if (!selected) selected = this.nests[0];
-    if (!selected || !selected.placements) return 0;
-
-    var isWarpH = this.warpDirection !== "vertical";
-    var self = this;
-    var trimmedCount = 0;
-
-    selected.placements.forEach(function (sg) {
-      var sheetPart = self.parts[sg.sheet];
-      if (!sheetPart || !sheetPart.sheet) return;
-
-      // Find the maximum length-axis extent of non-sheet placements
-      // on this sheet. §9.0.1 R6-A: measured from the part's EXACT placed
-      // bounds (rotation-aware, via placedBounds) relative to the sheet's
-      // own origin — the old `p.x + bounds.width` shortcut overestimated,
-      // which made Trim *grow* sheets past the size that already fit.
-      var maxExtent = 0;
-      for (var j = 0; j < sg.sheetplacements.length; j++) {
-        var p = sg.sheetplacements[j];
-        var part = self.parts[p.source];
-        if (!part || part.sheet) continue;
-        var pb = self.placedBounds(part, p);
-        if (!pb) continue;
-        var end = isWarpH
-          ? pb.x + pb.width - sheetPart.bounds.x
-          : pb.y + pb.height - sheetPart.bounds.y;
-        if (end > maxExtent) maxExtent = end;
-      }
-      if (maxExtent <= 0) return;
-
-      var bx = sheetPart.bounds.x;
-      var by = sheetPart.bounds.y;
-      var newW = isWarpH ? maxExtent : sheetPart.bounds.width;
-      var newH = isWarpH ? sheetPart.bounds.height : maxExtent;
-
-      // Skip if no change (within a tiny epsilon).
-      if (
-        Math.abs(newW - sheetPart.bounds.width) < 0.01 &&
-        Math.abs(newH - sheetPart.bounds.height) < 0.01
-      ) {
-        return;
-      }
-
-      sheetPart.bounds.width = newW;
-      sheetPart.bounds.height = newH;
-      sheetPart.area = newW * newH;
-
-      // Rebuild the 4-corner polygontree.
-      sheetPart.polygontree.length = 0;
-      sheetPart.polygontree.push({ x: bx, y: by });
-      sheetPart.polygontree.push({ x: bx + newW, y: by });
-      sheetPart.polygontree.push({ x: bx + newW, y: by + newH });
-      sheetPart.polygontree.push({ x: bx, y: by + newH });
-
-      // Update the underlying <rect> element so the visual matches.
-      // svgelements[0] is the rect created in sheet-dialog.createSheetSvg.
-      var rect = sheetPart.svgelements && sheetPart.svgelements[0];
-      if (rect && rect.tagName === "rect") {
-        rect.setAttribute("width", String(newW));
-        rect.setAttribute("height", String(newH));
-      }
-
-      trimmedCount++;
-    });
-
-    if (trimmedCount > 0) {
-      // Nest results reference part indices and sheet sizes; after
-      // trim they're advisory. Clear so the UI doesn't show stale
-      // placements as if they were validated against the new sizes.
-      this.nests.length = 0;
-    }
-    return trimmedCount;
-  };
-
   // §9.3.2 mirror toggle — behaviour 1 (Mirror, replace).
   //
   // Toggles the mirror flag on the part at `partIndex`, mirrors its
@@ -1696,7 +1596,7 @@ export class DeepNest {
   // the ORIGIN by placement.rotation (degrees), THEN translate by the
   // placement (x, y). The old shortcut `p.x + part.bounds.width` ignored both
   // the rotation and the polygon's own coordinate offset, so the min-length
-  // stat, Trim sheets, and the cut-list "length used" all disagreed with the
+  // stat, the old Trim sheets, and the cut-list "length used" all disagreed with the
   // real layout (testing round 6: stat said 171.5 in on a 160 in sheet with
   // everything placed — and Trim *grew* the sheet to the overestimate).
   // Only the outer ring matters for bounds (holes lie inside it).

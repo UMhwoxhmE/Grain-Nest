@@ -34,6 +34,9 @@ type Pt = { x: number; y: number };
 /** v1.6.0: notches up to this size (mm) are left out of the sew line. */
 const NOTCH_MAX_MM = 12;
 
+/** v1.7.0: margin (mm) between the nested pieces and the cropped page edge. */
+const CROP_MARGIN_MM = 10;
+
 /** The bit of the global SvgParser the export uses. */
 interface SvgParserLike {
   polygonify(element: SVGElement): Pt[];
@@ -807,9 +810,15 @@ export class ExportService {
     let svgWidth = calibration.width;
     let svgHeight = calibration.height;
 
+    // v1.7.0: each sheet's page is cropped to the pieces nested on it (plus
+    // a margin, kept within the fabric), so a few small pieces on wide
+    // fabric don't come out on a huge, mostly empty page. Replaces the old
+    // Trim sheets button, which shrank the sheet and threw the layout away.
+    const margin = toSvgUnits(CROP_MARGIN_MM, style.scale, "mm");
+
     sheets.forEach((s, sheetIndex) => {
       const sheetPart = parts[s.sheet];
-      const sheetBounds = sheetPart.bounds;
+      const sheetBounds = this.piecesBox(s, sheetPart.bounds, margin);
       const sheetName = (sheetPart.name || "").trim();
       const layer = this.createLayer(
         uniqueId(`layer-sheet-${sheetIndex + 1}`),
@@ -825,14 +834,22 @@ export class ExportService {
         const border = document.createElementNS(SVG_NS, "g");
         border.setAttribute("id", uniqueId(`border-${sheetIndex + 1}`));
         border.setAttributeNS(INKSCAPE_NS, "inkscape:label", "Sheet border");
-        // v1.6.0: drawn half a line width inside the sheet's edge, so the
-        // whole line is on the page (it used to be half cut off).
-        sheetPart.svgelements.forEach((e) => {
-          const node = this.insetBorder(e, style.width / 2);
-          node.removeAttribute("class");
-          node.setAttribute("style", style.line(style.border));
-          border.appendChild(node);
-        });
+        // v1.6.0: drawn half a line width inside the page's edge, so the
+        // whole line is on the page. v1.7.0: round the nested pieces.
+        const inset = style.width / 2;
+        const rect = document.createElementNS(SVG_NS, "rect");
+        rect.setAttribute("x", round(sheetBounds.x + inset));
+        rect.setAttribute("y", round(sheetBounds.y + inset));
+        rect.setAttribute(
+          "width",
+          round(Math.max(sheetBounds.width - 2 * inset, 0)),
+        );
+        rect.setAttribute(
+          "height",
+          round(Math.max(sheetBounds.height - 2 * inset, 0)),
+        );
+        rect.setAttribute("style", style.line(style.border));
+        border.appendChild(rect);
         layer.appendChild(border);
       }
 
@@ -1055,45 +1072,34 @@ export class ExportService {
   }
 
   /**
-   * v1.6.0: a copy of a sheet outline moved `inset` inwards. A rectangle
-   * (Add sheet) just shrinks; any other shape is offset as a polygon.
+   * v1.7.0: the box round the pieces nested on one sheet, grown by
+   * `margin` but kept within the sheet. The whole sheet if nothing on it
+   * can be measured.
    */
-  private insetBorder(e: Element, inset: number): Element {
-    if (e.tagName.toLowerCase() === "rect" && !e.getAttribute("transform")) {
-      const node = e.cloneNode(false) as Element;
-      const n = (k: string) => Number(e.getAttribute(k)) || 0;
-      const w = n("width") - 2 * inset;
-      const h = n("height") - 2 * inset;
-      if (w > 0 && h > 0) {
-        node.setAttribute("x", round(n("x") + inset));
-        node.setAttribute("y", round(n("y") + inset));
-        node.setAttribute("width", round(w));
-        node.setAttribute("height", round(h));
-      }
-      return node;
-    }
-    const parser = (window as unknown as { SvgParser?: SvgParserLike })
-      .SvgParser;
-    try {
-      const pts = parser?.polygonify(e as SVGElement) || [];
-      const inner =
-        pts.length > 2 && this.deepNest
-          ? this.deepNest.polygonOffset(pts, -inset)[0]
-          : null;
-      if (inner && inner.length > 2) {
-        const path = document.createElementNS(SVG_NS, "path");
-        path.setAttribute(
-          "d",
-          "M " +
-            inner.map((p) => `${round(p.x)} ${round(p.y)}`).join(" L ") +
-            " Z",
-        );
-        return path;
-      }
-    } catch {
-      // fall through to the outline as it is
-    }
-    return e.cloneNode(false) as Element;
+  private piecesBox(
+    sheet: SheetGroup,
+    bounds: { x: number; y: number; width: number; height: number },
+    margin: number,
+  ): { x: number; y: number; width: number; height: number } {
+    let minX = Infinity;
+    let minY = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
+    sheet.sheetplacements.forEach((p) => {
+      const part = this.deepNest!.parts[p.source];
+      const b = part ? this.deepNest!.placedBounds(part, p) : null;
+      if (!b) return;
+      minX = Math.min(minX, b.x);
+      minY = Math.min(minY, b.y);
+      maxX = Math.max(maxX, b.x + b.width);
+      maxY = Math.max(maxY, b.y + b.height);
+    });
+    if (!(maxX > minX && maxY > minY)) return { ...bounds };
+    const x = Math.max(bounds.x, minX - margin);
+    const y = Math.max(bounds.y, minY - margin);
+    const right = Math.min(bounds.x + bounds.width, maxX + margin);
+    const bottom = Math.min(bounds.y + bounds.height, maxY + margin);
+    return { x, y, width: right - x, height: bottom - y };
   }
 
   /**

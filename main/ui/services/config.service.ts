@@ -31,7 +31,8 @@ export const DEFAULT_CONFIG: Readonly<UIConfig> = {
   threads: 4,
   populationSize: 10,
   mutationRate: 10,
-  placementType: "box" as PlacementType, // how to place each part (possible values gravity, box, convexhull)
+  // v1.7.0: Gravity (least fabric length) by default; Squeeze is retired.
+  placementType: "gravity" as PlacementType, // gravity or box
   // v1.3.0: the laser-cutting options are retired (settings review):
   // no line merging, and nests are scored on fabric only. Forced on load by
   // retireSettings(), whatever an older settings file says.
@@ -70,7 +71,7 @@ export const DEFAULT_CONFIG: Readonly<UIConfig> = {
   // project's Woven / Knit switch (DeepNest.fabricType).
   defaultSeamAllowanceKnitMm: 10,
   // v1.3.0: bumped when saved settings need a one-off migration.
-  settingsRevision: 2,
+  settingsRevision: 3,
 };
 
 /**
@@ -199,8 +200,9 @@ export class ConfigService implements ConfigObject {
    * page keep their harmless value even if an older settings file says
    * otherwise — no laser line-merging, fabric-only scoring, no rough
    * shapes, no SVG normaliser (it strips Inkscape labels), no quantity
-   * from filenames. One-off migrations: the sheet border defaults to on
-   * (v1.3.0) and a white border becomes cyan (v1.6.0).
+   * from filenames, no Squeeze packing (v1.7.0). One-off migrations: the
+   * sheet border defaults to on (v1.3.0), a white border becomes cyan
+   * (v1.6.0) and Bounding box packing becomes Gravity (v1.7.0).
    */
   private retireSettings(saved: Partial<UIConfig>): void {
     this.setConfigValue("mergeLines", false);
@@ -218,6 +220,16 @@ export class ConfigService implements ConfigObject {
         this.setConfigValue("exportBorderColour", "#00ffff");
       this.setConfigValue("settingsRevision", 2);
     }
+    // v1.7.0: Gravity becomes the default; the old Bounding box default
+    // switches over once (a later choice of Bounding box is kept).
+    if ((saved.settingsRevision ?? 0) < 3) {
+      if ((saved.placementType ?? "box") === "box")
+        this.setConfigValue("placementType", "gravity");
+      this.setConfigValue("settingsRevision", 3);
+    }
+    // v1.7.0: Squeeze is retired (no use for fabric).
+    if (this.config.placementType === "convexhull")
+      this.setConfigValue("placementType", "gravity");
   }
 
   /**

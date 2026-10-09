@@ -1408,6 +1408,9 @@ export class PartsViewService {
     const p = new DOMPoint(x, y).matrixTransform(ctm.inverse());
     const ok = this.deepNest.markFoldEdge(idx, { x: p.x, y: p.y });
     this.cancelMarkingMode();
+    // v1.7.0: like the other actions, a marked fold unselects the piece.
+    if (ok && this.deepNest.parts[idx])
+      this.deepNest.parts[idx].selected = false;
     if (!ok) {
       message(
         "Couldn't fold the piece along that edge. Click right on its straight fold edge.",

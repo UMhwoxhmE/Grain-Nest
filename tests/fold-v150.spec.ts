@@ -79,6 +79,12 @@ test("Mark fold, folded mirror copies, mirror-then-fold, re-mark", async () => {
     });
   const zoomBefore = await width();
   const before = await bounds(k);
+  // v1.7.0: the piece is selected first; marking its fold unselects it.
+  await mainWindow.evaluate((k) => {
+    (
+      window as unknown as { DeepNest: { parts: { selected?: boolean }[] } }
+    ).DeepNest.parts[k].selected = true;
+  }, k);
   await rows.nth(k).locator("a.markfold").click();
   await expect(mainWindow.locator("#grainmarker-banner")).toHaveClass(/active/);
   expect(await width()).toBeGreaterThan(zoomBefore * 2);
@@ -105,6 +111,18 @@ test("Mark fold, folded mirror copies, mirror-then-fold, re-mark", async () => {
     /active/,
   );
   const after = await bounds(k);
+  expect(
+    await mainWindow.evaluate(
+      (k) =>
+        !!(
+          window as unknown as {
+            DeepNest: { parts: { selected?: boolean }[] };
+          }
+        ).DeepNest.parts[k].selected,
+      k,
+    ),
+    "the folded piece is unselected",
+  ).toBe(false);
   expect(
     await mainWindow.evaluate(
       (k) =>

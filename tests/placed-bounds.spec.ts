@@ -3,7 +3,7 @@
 //
 // DeepNest.placedBounds(part, placement) is the single source of truth for
 // "how far does a placed piece reach" — used by the min-fabric-length stat,
-// Trim sheets, and the cut-list "length used". It must reproduce the
+// export's page crop, and the cut-list "length used". It must reproduce the
 // placement worker's convention exactly: rotate the baked polygontree about
 // the ORIGIN by placement.rotation (degrees), then translate by (x, y).
 // The bug it replaced (`p.x + part.bounds.width`) ignored rotation and the

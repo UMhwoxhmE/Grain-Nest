@@ -783,50 +783,6 @@ function initializeFabricTypeSelect(): void {
 // just restoring the <select> in index.html and these two helpers.
 
 /**
- * §9.3.6: Initialize the Trim sheets button. On click, calls
- * DeepNest.trimSheetsToMinLength() which mutates each used sheet
- * in place and clears nests. After the call we re-render both the
- * parts ractive (sheet bounds changed) and the nest ractive (nests
- * cleared) and surface a small message so the user knows to
- * re-run Start nest.
- */
-function initializeTrimSheetsButton(): void {
-  const btn = getElement<HTMLElement>("#trimsheets");
-  if (!btn) return;
-  btn.onclick = () => {
-    const dn = getDeepNest();
-    const count = dn.trimSheetsToMinLength();
-    if (count === 0) {
-      message(
-        "Nothing to trim — run a nest first, then select it before trimming.",
-        false,
-      );
-      return false;
-    }
-    // Sheet bounds changed → parts table thumbnails need a redraw.
-    const partsRactive = partsViewService.getRactive() as unknown as {
-      update(keypath?: string): Promise<void>;
-    } | null;
-    if (partsRactive) {
-      partsRactive.update("parts");
-    }
-    // Nests were cleared and the sheet shrank. The nest preview is drawn
-    // imperatively into #nestsvg (cached sheet/part groups cloned at the old
-    // size), so a Ractive update can't refresh it — and the stale sheet group
-    // would even be reused at the old size on the next nest. clearDisplay()
-    // empties #nestsvg (forcing a rebuild at the trimmed bounds) and resets
-    // the nest stats to "-".
-    nestViewService.clearDisplay();
-    const word = count === 1 ? "sheet" : "sheets";
-    message(
-      `Trimmed ${count} ${word} to fit. Click Start nest to re-verify.`,
-      false,
-    );
-    return false;
-  };
-}
-
-/**
  * §9.3.3: Initialize Save / Open project button handlers.
  */
 function initializeProjectButtons(): void {
@@ -884,7 +840,7 @@ function initializeClearAllButton(): void {
       partsRactive.update("parts");
     }
     // Clear the imperative nest preview (#nestsvg) + reset its stats — a
-    // Ractive update alone won't touch it (same reason as Trim sheets).
+    // Ractive update alone won't touch it (it's drawn imperatively into #nestsvg).
     nestViewService.clearDisplay();
     message("Workspace cleared.", false);
     return false;
@@ -1024,7 +980,6 @@ async function initialize(): Promise<void> {
   await step("initializeClearAllButton", () => initializeClearAllButton());
   await step("initializeNapCheckbox", () => initializeNapCheckbox());
   await step("initializeFabricTypeSelect", () => initializeFabricTypeSelect());
-  await step("initializeTrimSheetsButton", () => initializeTrimSheetsButton());
   await step("initializeExportButtons", () => initializeExportButtons());
 
   // Load initial files from nest directory

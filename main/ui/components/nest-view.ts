@@ -643,8 +643,8 @@ export class NestViewService {
   }
 
   /**
-   * §9.3.6 / phase-5z: empty the nest preview and reset its stats. Used after
-   * Trim sheets clears DeepNest.nests. The preview is built *imperatively*
+   * §9.3.6 / phase-5z: empty the nest preview and reset its stats, for when
+   * DeepNest.nests has been cleared. The preview is built *imperatively*
    * into #nestsvg (cached per-sheet and per-part groups whose sheet `<rect>`
    * was cloned at the OLD bounds), so a Ractive update alone never refreshes
    * it — and worse, the cached sheet group would be reused at the stale size

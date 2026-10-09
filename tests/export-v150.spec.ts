@@ -319,6 +319,15 @@ test("Settings: export line width and colours", async () => {
   await expect(mainWindow.locator("#exportBorderColour")).toHaveValue(
     "#00ffff",
   );
+  // v1.7.0: Gravity packing by default; Squeeze is gone.
+  await expect(mainWindow.locator('select[name="placementType"]')).toHaveValue(
+    "gravity",
+  );
+  await expect(
+    mainWindow.locator(
+      'select[name="placementType"] option[value="convexhull"]',
+    ),
+  ).toHaveCount(0);
   // Changing them saves them.
   const saved = await mainWindow.evaluate(() => {
     const set = (id: string, v: string) => {

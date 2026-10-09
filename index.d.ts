@@ -390,13 +390,6 @@ export interface DeepNestInstance {
    * Reset nesting state
    */
   reset(): void;
-
-  /**
-   * §9.3.6: trim the used sheets down to the placed-piece extent on
-   * the currently-selected nest, then clear nests. See
-   * main/ui/types/index.ts for the runtime-side definition.
-   */
-  trimSheetsToMinLength(): number;
 }
 
 /**

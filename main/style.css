@@ -534,8 +534,11 @@ ul.dropdown li:hover {
 
 /* config */
 
+/* v1.7.0: the form takes 55% (it was 40%, which cut off the Packing
+   style drop-down under the help panel); the help panel sits beside it. */
 #configform {
-  width: 40%;
+  width: 55%;
+  box-sizing: border-box;
   height: 100%;
   background-color: var(--bg-secondary);
   display: flex;
@@ -585,11 +588,11 @@ ul.dropdown li:hover {
   }
 
   #config dl dt {
-    width: 50%;
+    width: 40%;
   }
 
   #config dl dd {
-    width: 50%;
+    width: 60%;
   }
 }
 
@@ -656,9 +659,16 @@ ul.dropdown li:hover {
   display: none;
   position: absolute;
   top: 0;
-  left: 50%;
-  width: 25em;
-  padding: 5em 2% 0 5%;
+  left: 55%;
+  width: 40%;
+  max-width: 28em;
+  box-sizing: border-box;
+  padding: 5em 2% 0 4%;
+}
+/* Drop-downs fit their column instead of pushing past it. */
+#config dl dd select {
+  max-width: 100%;
+  min-width: 0;
 }
 
 .config_explain.active {

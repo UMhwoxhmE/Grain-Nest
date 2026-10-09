@@ -286,20 +286,11 @@ export interface DeepNestInstance {
   polygonOffset(polygon: Polygon, offset: number): Polygon[];
 
   /**
-   * §9.3.6: for each sheet used by the currently-selected nest,
-   * shrink its length-axis dimension down to the actual extent of
-   * placed pieces. Clears `nests` afterward (placements become
-   * advisory; user must re-run Start nest to verify). Returns the
-   * number of sheets that were trimmed.
-   */
-  trimSheetsToMinLength(): number;
-
-  /**
    * §9.0.1 R6-A: exact bounding box of a part at a given placement —
    * rotates the baked polygontree about the origin by the placement
    * rotation (the placement worker's own convention), then translates by
    * the placement x/y. Single source of truth for the min-length stat,
-   * Trim sheets, and the cut-list "length used". Returns null when the
+   * export's page crop, and the cut-list "length used". Returns null when the
    * part has no usable polygon.
    */
   placedBounds(

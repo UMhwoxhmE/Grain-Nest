@@ -518,8 +518,8 @@ bolt: the **Length** runs **left to right**, across the screen, and the
 selvedges.
 
 It's fine to start with a generous length: the nest tells you the **min fabric
-length** actually used, and **Trim sheets** shrinks the sheet to fit (see
-[Running a nest](#running-a-nest)).
+length** actually used, and the exported SVG is cropped to the pieces (see
+[What's in the exported SVG](#whats-in-the-exported-svg)).
 
 ### Several sheets and several fabrics
 
@@ -610,10 +610,7 @@ far.
   pieces actually use, i.e. the least you need to buy.
 - **Best nests so far** lists the layouts found, sorted **least fabric
   first**, each with its fabric length. Click one to show it; that's the one
-  Export and Trim sheets use.
-- **Trim sheets** shrinks each sheet to the length the **selected** layout
-  used. The nest results are cleared; click **Start nest** again at the trimmed
-  size and the utilisation should jump.
+  Export uses.
 - **Export** saves the selected layout as an **SVG file** or a **Cut list
   (text)**.
 - **Back** returns to the parts list. This stops the nest and **clears the
@@ -626,6 +623,12 @@ can turn freely — that's the cost of cutting on grain.
 
 The exported file is laid out like your pattern file, so it's easy to open in
 Inkscape or Pattern Projector.
+
+The page is **cropped to the pieces**: each sheet's part of the page is the box
+round the pieces nested on it, plus 10 mm, kept within the fabric. So a few
+small pieces on wide fabric come out on a small page, not a huge empty one.
+Where the pieces reach the fabric's edge (the selvedge, or the start of the
+length), the page and border stop there too, so you can line up against it.
 
 ### Layers
 
@@ -641,8 +644,8 @@ scale (or hide it in Inkscape).
 
 ### Inside each sheet layer
 
-- A **Sheet border** group with the outline of the fabric (when **Draw the
-  sheet border** is on in Settings).
+- A **Sheet border** group: a box round the pieces, at the edge of the cropped
+  page (when **Draw the sheet border** is on in Settings).
 - One group per piece, labelled with the piece's name (mirrored pieces add
   **(mirrored)**). Inside, using the piece number from the start of the name
   (`14` for "14 Skirt Front C1OF"):
@@ -671,7 +674,7 @@ Every line is the same width — **2 mm** by default — and the colours come fr
 
 The border is cyan so it shows up both on a white page and when Pattern
 Projector inverts the colours for projecting onto fabric (a white border
-vanished in one or the other). It's drawn just inside the edge of the sheet, so
+vanished in one or the other). It's drawn just inside the edge of the page, so
 the whole line is on the page.
 
 ### Checking the scale
@@ -730,10 +733,16 @@ everything back.
 - **Nesting**
   - **Display units** — inches or mm.
   - **Space between pieces** — a gap kept around every piece.
-  - **Packing style** — *Gravity* pushes pieces towards one end and usually
-    uses the least fabric length, so it's the best choice for fabric;
-    *Bounding box* keeps the layout as compact a rectangle as possible;
-    *Squeeze* packs pieces into each other's outlines.
+  - **Packing style** — how the pieces are packed:
+    - *Gravity* (the default) fills across the fabric's width, selvedge to
+      selvedge, before using more length, so the layout takes the least length
+      of fabric. Use it for most cutting: lots of pieces on fashion or lining
+      fabric.
+    - *Bounding box* keeps the pieces in the most compact rectangle, using
+      width and length evenly. Handy for bulk-fusing interfacing: fuse one block
+      of interfacing to the fashion fabric and cut the pieces from it, with as
+      little interfacing wasted as possible (interfacing is usually much
+      narrower than the fabric).
 - **Seam allowance** — the default for wovens (12 mm) and knits (10 mm).
 - **Export**
   - **Draw the sheet border** — on by default; handy for lining up a projector.
