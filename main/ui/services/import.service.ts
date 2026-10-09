@@ -1,11 +1,10 @@
 /**
  * Import Service
- * Handles SVG/DXF/DWG file import with conversion server API
- * Manages file selection, reading, and conversion workflow
+ * Handles SVG file import: file selection, reading and handing the
+ * drawing to DeepNest
  */
 
 import type {
-  UIConfig,
   Part,
   DeepNestInstance,
   RactiveInstance,
@@ -74,61 +73,6 @@ interface PathModule {
 }
 
 /**
- * Axios-like HTTP client interface
- */
-interface HttpClient {
-  post(
-    url: string,
-    data: Buffer,
-    options: { headers: Record<string, string>; responseType: string },
-  ): Promise<{ data: string }>;
-}
-
-/**
- * FormData-like interface for file upload
- */
-interface FormDataLike {
-  append(
-    name: string,
-    value: Buffer | string,
-    options?: { filename?: string; contentType?: string },
-  ): void;
-  getBuffer(): Buffer;
-  getHeaders(): Record<string, string>;
-}
-
-/**
- * FormData constructor interface
- */
-interface FormDataConstructor {
-  new (): FormDataLike;
-}
-
-/**
- * SVG Pre-processor result
- */
-interface SvgPreProcessorResult {
-  success: boolean;
-  result: string;
-}
-
-/**
- * SVG Pre-processor interface
- */
-interface SvgPreProcessor {
-  loadSvgString(svgString: string, scale: number): SvgPreProcessorResult;
-}
-
-/**
- * Config getter interface
- */
-interface ConfigGetter {
-  getSync<K extends keyof UIConfig>(
-    key?: K,
-  ): K extends keyof UIConfig ? UIConfig[K] : UIConfig;
-}
-
-/**
  * Supported file extensions for import
  */
 const SUPPORTED_EXTENSIONS = {
@@ -160,12 +104,6 @@ export class ImportService {
   /** Node.js path module */
   private path: PathModule | null = null;
 
-  /** SVG pre-processor for cleaning input */
-  private svgPreProcessor: SvgPreProcessor | null = null;
-
-  /** Configuration getter */
-  private config: ConfigGetter | null = null;
-
   /** DeepNest instance for importing parts */
   private deepNest: DeepNestInstance | null = null;
 
@@ -193,10 +131,6 @@ export class ImportService {
     remote?: ElectronRemote;
     fs?: FileSystem;
     path?: PathModule;
-    httpClient?: HttpClient;
-    FormData?: FormDataConstructor;
-    svgPreProcessor?: SvgPreProcessor;
-    config?: ConfigGetter;
     deepNest?: DeepNestInstance;
     ractive?: RactiveInstance<PartsViewData>;
     attachSortCallback?: () => void;
@@ -208,8 +142,6 @@ export class ImportService {
       this.remote = options.remote || null;
       this.fs = options.fs || null;
       this.path = options.path || null;
-      this.svgPreProcessor = options.svgPreProcessor || null;
-      this.config = options.config || null;
       this.deepNest = options.deepNest || null;
       this.ractive = options.ractive || null;
       this.attachSortCallback = options.attachSortCallback || null;
@@ -248,22 +180,6 @@ export class ImportService {
    */
   setPath(path: PathModule): void {
     this.path = path;
-  }
-
-  /**
-   * Set the SVG pre-processor
-   * @param svgPreProcessor - SVG pre-processor instance
-   */
-  setSvgPreProcessor(svgPreProcessor: SvgPreProcessor): void {
-    this.svgPreProcessor = svgPreProcessor;
-  }
-
-  /**
-   * Set the configuration getter
-   * @param config - Configuration object with getSync method
-   */
-  setConfig(config: ConfigGetter): void {
-    this.config = config;
   }
 
   /**
@@ -414,8 +330,7 @@ export class ImportService {
   }
 
   /**
-   * Process SVG data (either from file or conversion)
-   * Optionally runs through SVG pre-processor
+   * Process SVG data read from a file
    * @param data - SVG content as string
    * @param filename - Original filename
    * @param dirpath - Directory path for resolving relative paths (null for converted files)
@@ -429,32 +344,7 @@ export class ImportService {
     scalingFactor: number | null = null,
     dxfFlag = false,
   ): void {
-    const useSvgPreProcessor = this.config?.getSync("useSvgPreProcessor");
-
-    if (useSvgPreProcessor && this.svgPreProcessor) {
-      try {
-        const scale = Number(this.config?.getSync("scale")) || 72;
-        const svgResult = this.svgPreProcessor.loadSvgString(data, scale);
-
-        if (!svgResult.success) {
-          message(svgResult.result, true);
-          return;
-        }
-
-        this.importData(
-          svgResult.result,
-          filename,
-          dirpath,
-          scalingFactor,
-          dxfFlag,
-        );
-      } catch (e) {
-        const error = e as Error;
-        message("Error processing SVG: " + error.message, true);
-      }
-    } else {
-      this.importData(data, filename, dirpath, scalingFactor, dxfFlag);
-    }
+    this.importData(data, filename, dirpath, scalingFactor, dxfFlag);
   }
 
   /**
@@ -530,7 +420,6 @@ export class ImportService {
       dirpath?: string | null;
       scalingFactor?: number | null;
       dxfFlag?: boolean;
-      usePreProcessor?: boolean;
     },
   ): Part[] | null {
     if (!this.deepNest) {
@@ -541,32 +430,11 @@ export class ImportService {
     const dirpath = options?.dirpath ?? null;
     const scalingFactor = options?.scalingFactor ?? null;
     const dxfFlag = options?.dxfFlag ?? false;
-    const usePreProcessor = options?.usePreProcessor ?? false;
-
-    let processedData = svgString;
-
-    if (usePreProcessor && this.svgPreProcessor) {
-      try {
-        const scale = Number(this.config?.getSync("scale")) || 72;
-        const svgResult = this.svgPreProcessor.loadSvgString(svgString, scale);
-
-        if (!svgResult.success) {
-          message(svgResult.result, true);
-          return null;
-        }
-
-        processedData = svgResult.result;
-      } catch (e) {
-        const error = e as Error;
-        message("Error processing SVG: " + error.message, true);
-        return null;
-      }
-    }
 
     const parts = this.deepNest.importsvg(
       filename,
       dirpath,
-      processedData,
+      svgString,
       scalingFactor,
       dxfFlag,
     );

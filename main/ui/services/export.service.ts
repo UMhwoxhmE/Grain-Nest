@@ -1,6 +1,6 @@
 /**
  * Export Service
- * Handles SVG/DXF/JSON export functionality for nesting results
+ * Handles SVG/JSON/cut-list export functionality for nesting results
  * Manages file save dialogs, format conversion, and file writing
  */
 
@@ -10,7 +10,6 @@ import type {
   SelectableNestingResult,
   Part,
 } from "../types/index.js";
-import { DEFAULT_CONVERSION_SERVER } from "../types/index.js";
 import { message } from "../utils/ui-helpers.js";
 import { foldReflectionTransform } from "../utils/dom-utils.js";
 import { toSvgUnits } from "../utils/conversion.js";
@@ -285,37 +284,6 @@ interface FileSystem {
 }
 
 /**
- * Axios-like HTTP client interface
- */
-interface HttpClient {
-  post(
-    url: string,
-    data: Buffer,
-    options: { headers: Record<string, string>; responseType: string },
-  ): Promise<{ data: string }>;
-}
-
-/**
- * FormData-like interface for file upload
- */
-interface FormDataLike {
-  append(
-    name: string,
-    value: Buffer | string,
-    options?: { filename?: string; contentType?: string },
-  ): void;
-  getBuffer(): Buffer;
-  getHeaders(): Record<string, string>;
-}
-
-/**
- * FormData constructor interface
- */
-interface FormDataConstructor {
-  new (): FormDataLike;
-}
-
-/**
  * Config getter interface
  */
 interface ConfigGetter {
@@ -346,33 +314,14 @@ interface SheetGroup {
 }
 
 /**
- * Export button element interface
- */
-interface ExportButtonElement extends HTMLElement {
-  className: string;
-}
-
-/**
- * Export options for SVG generation
- */
-export interface ExportOptions {
-  /** Whether this export is for DXF conversion (affects scaling) */
-  forDxfConversion?: boolean;
-}
-
-/**
  * Export file formats
  */
-export type ExportFormat = "svg" | "dxf" | "json" | "cutlist";
+export type ExportFormat = "svg" | "json" | "cutlist";
 
 /**
  * File filters for export dialogs
  */
 const SVG_FILE_FILTERS: FileFilter[] = [{ name: "SVG", extensions: ["svg"] }];
-
-const DXF_FILE_FILTERS: FileFilter[] = [
-  { name: "DXF/DWG", extensions: ["dxf", "dwg"] },
-];
 
 const CUTLIST_FILE_FILTERS: FileFilter[] = [
   { name: "Text", extensions: ["txt"] },
@@ -393,20 +342,11 @@ export class ExportService {
   /** Node.js file system module */
   private fs: FileSystem | null = null;
 
-  /** HTTP client for conversion requests */
-  private httpClient: HttpClient | null = null;
-
-  /** FormData constructor for file upload */
-  private FormData: FormDataConstructor | null = null;
-
   /** Configuration getter */
   private config: ConfigGetter | null = null;
 
   /** DeepNest instance for accessing parts and nests */
   private deepNest: DeepNestInstance | null = null;
-
-  /** Export button element for spinner state */
-  private exportButton: ExportButtonElement | null = null;
 
   /** Flag to track if export is busy */
   private isExporting = false;
@@ -419,21 +359,15 @@ export class ExportService {
     dialog?: ElectronDialog;
     remote?: ElectronRemote;
     fs?: FileSystem;
-    httpClient?: HttpClient;
-    FormData?: FormDataConstructor;
     config?: ConfigGetter;
     deepNest?: DeepNestInstance;
-    exportButton?: ExportButtonElement;
   }) {
     if (options) {
       this.dialog = options.dialog || null;
       this.remote = options.remote || null;
       this.fs = options.fs || null;
-      this.httpClient = options.httpClient || null;
-      this.FormData = options.FormData || null;
       this.config = options.config || null;
       this.deepNest = options.deepNest || null;
-      this.exportButton = options.exportButton || null;
     }
   }
 
@@ -462,22 +396,6 @@ export class ExportService {
   }
 
   /**
-   * Set the HTTP client for conversion requests
-   * @param httpClient - HTTP client (e.g., axios)
-   */
-  setHttpClient(httpClient: HttpClient): void {
-    this.httpClient = httpClient;
-  }
-
-  /**
-   * Set the FormData constructor
-   * @param FormData - FormData constructor
-   */
-  setFormDataConstructor(FormData: FormDataConstructor): void {
-    this.FormData = FormData;
-  }
-
-  /**
    * Set the configuration getter
    * @param config - Configuration object with getSync method
    */
@@ -491,27 +409,6 @@ export class ExportService {
    */
   setDeepNest(deepNest: DeepNestInstance): void {
     this.deepNest = deepNest;
-  }
-
-  /**
-   * Set the export button element for spinner state
-   * @param button - Export button element
-   */
-  setExportButton(button: ExportButtonElement): void {
-    this.exportButton = button;
-  }
-
-  /**
-   * Get the conversion server URL from config or use default
-   * @returns Conversion server URL
-   */
-  private getConversionServerUrl(): string {
-    if (!this.config) {
-      return DEFAULT_CONVERSION_SERVER;
-    }
-
-    const configUrl = this.config.getSync("conversionServer");
-    return configUrl || DEFAULT_CONVERSION_SERVER;
   }
 
   /**
@@ -529,19 +426,6 @@ export class ExportService {
     }
 
     return selected[selected.length - 1];
-  }
-
-  /**
-   * Show the export button as loading
-   */
-  private setExportLoading(loading: boolean): void {
-    if (this.exportButton) {
-      if (loading) {
-        this.exportButton.className = "button export spinner";
-      } else {
-        this.exportButton.className = "button export";
-      }
-    }
   }
 
   /**
@@ -822,114 +706,12 @@ export class ExportService {
   }
 
   /**
-   * Show save dialog and export to DXF via conversion server
-   * @returns Promise that resolves to true if export was successful
-   */
-  async exportToDxf(): Promise<boolean> {
-    if (!this.dialog || !this.fs || !this.httpClient || !this.FormData) {
-      message("Export dependencies not available", true);
-      return false;
-    }
-
-    let fileName = this.dialog.showSaveDialogSync({
-      title: "Export DXF",
-      filters: DXF_FILE_FILTERS,
-    });
-
-    if (fileName === undefined) {
-      return false;
-    }
-
-    // Ensure .dxf or .dwg extension
-    if (
-      !fileName.toLowerCase().endsWith(".dxf") &&
-      !fileName.toLowerCase().endsWith(".dwg")
-    ) {
-      fileName = fileName + ".dxf";
-    }
-
-    const selected = this.getSelectedNest();
-    if (!selected) {
-      return false;
-    }
-
-    const url = this.getConversionServerUrl();
-    this.setExportLoading(true);
-
-    try {
-      // Generate SVG with DXF scaling
-      const svgContent = this.generateSvgExport(selected, {
-        forDxfConversion: true,
-      });
-
-      const formData = new this.FormData();
-      formData.append("fileUpload", Buffer.from(svgContent), {
-        filename: "deepnest.svg",
-        contentType: "image/svg+xml",
-      });
-      formData.append("format", "dxf");
-
-      const response = await this.httpClient.post(url, formData.getBuffer(), {
-        headers: formData.getHeaders(),
-        responseType: "text",
-      });
-
-      const body = response.data;
-
-      // Check for error responses
-      if (body.substring(0, 5) === "error") {
-        message(body, true);
-        return false;
-      }
-
-      if (body.includes('"error"') && body.includes('"error_id"')) {
-        const jsonErr = JSON.parse(body) as { error_id: string };
-        message(
-          `There was an Error while converting: ${jsonErr.error_id}<br>Please use this code to open an issue on github.com/deepnest-next/deepnest`,
-          true,
-        );
-        return false;
-      }
-
-      this.fs.writeFileSync(fileName, body);
-      return true;
-    } catch (err) {
-      const error = err as { response?: { data: string }; message: string };
-      const errorData = error.response?.data || error.message;
-
-      if (
-        typeof errorData === "string" &&
-        errorData.includes('"error"') &&
-        errorData.includes('"error_id"')
-      ) {
-        const jsonErr = JSON.parse(errorData) as { error_id: string };
-        message(
-          `There was an Error while converting: ${jsonErr.error_id}<br>Please use this code to open an issue on github.com/deepnest-next/deepnest`,
-          true,
-        );
-      } else {
-        message(
-          `Could not contact file conversion server: ${JSON.stringify(err)}<br>Please use this code to open an issue on github.com/deepnest-next/deepnest`,
-          true,
-        );
-      }
-      return false;
-    } finally {
-      this.setExportLoading(false);
-    }
-  }
-
-  /**
    * Generate SVG content from a nesting result
    * Core function that builds the SVG document from placements
    * @param nestResult - The nesting result to export
-   * @param options - Export options
    * @returns SVG content as string
    */
-  generateSvgExport(
-    nestResult: SelectableNestingResult,
-    options: ExportOptions = {},
-  ): string {
+  generateSvgExport(nestResult: SelectableNestingResult): string {
     if (!this.deepNest || !this.config) {
       throw new Error("DeepNest or config not available");
     }
@@ -1004,7 +786,7 @@ export class ExportService {
       if (sheetIndex < sheets.length - 1) svgHeight += sheetGap;
     });
 
-    this.applyDimensions(svg, svgWidth, svgHeight, options);
+    this.applyDimensions(svg, svgWidth, svgHeight);
     return new XMLSerializer().serializeToString(svg);
   }
 
@@ -1393,25 +1175,17 @@ export class ExportService {
    * @param svg - SVG element
    * @param width - Content width in SVG units
    * @param height - Content height in SVG units
-   * @param options - Export options
    */
   private applyDimensions(
     svg: SVGSVGElement,
     width: number,
     height: number,
-    options: ExportOptions,
   ): void {
     if (!this.config) {
       return;
     }
 
     let scale = this.config.getSync("scale");
-
-    // Apply DXF export scale if converting to DXF
-    if (options.forDxfConversion) {
-      const dxfExportScale = Number(this.config.getSync("dxfExportScale")) || 1;
-      scale /= dxfExportScale;
-    }
 
     // Convert scale based on units
     const units = this.config.getSync("units");
@@ -1428,7 +1202,7 @@ export class ExportService {
 
   /**
    * Export to the specified format
-   * @param format - Export format (svg, dxf, or json)
+   * @param format - Export format (svg, json or cutlist)
    * @returns Promise that resolves to true if export was successful
    */
   async export(format: ExportFormat): Promise<boolean> {
@@ -1442,8 +1216,6 @@ export class ExportService {
       switch (format) {
         case "svg":
           return this.exportToSvg();
-        case "dxf":
-          return await this.exportToDxf();
         case "json":
           return this.exportToJson();
         case "cutlist":
@@ -1478,7 +1250,7 @@ export class ExportService {
    * @returns Array of supported format strings
    */
   static getSupportedFormats(): ExportFormat[] {
-    return ["svg", "dxf", "json", "cutlist"];
+    return ["svg", "json", "cutlist"];
   }
 
   /**
@@ -1490,8 +1262,6 @@ export class ExportService {
     switch (format) {
       case "svg":
         return [...SVG_FILE_FILTERS];
-      case "dxf":
-        return [...DXF_FILE_FILTERS];
       case "cutlist":
         return [...CUTLIST_FILE_FILTERS];
       default:

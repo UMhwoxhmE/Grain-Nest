@@ -10,4 +10,12 @@ This software contains different units with different licenses, copyrights and a
 | minkowski.cc, minkowski.h | Boost | Copyright 2010 Intel Corporation</br>Copyright 2015 Jack Qiao |
 | /polygon | Boost |  Copyright 2018 Glen Joseph Fernandes |
 | /main/util/ractive.js | MIT | Ractive.js contributors |
+| /main/util/simplify.js | BSD-2-Clause | Copyright (c) 2013 Vladimir Agafonkin (Simplify.js), modified by Jack Qiao |
 | /main/font | SIL Open Font License 1.1 | Lato, Copyright (c) 2010-2015 Łukasz Dziedzic |
+
+Packages installed from npm (see `package.json`; their licence texts are in
+their own folders under `node_modules`):
+
+| Package | License | Copyright |
+| - | - | - |
+| @deepnest/calculate-nfp | MIT | deepnest-next contributors |

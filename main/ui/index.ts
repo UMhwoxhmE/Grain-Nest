@@ -201,18 +201,10 @@ let electronRemote: {
   getGlobal: (name: string) => string | undefined;
 };
 let fs: unknown;
-let FormData: new () => unknown;
-let axios: { default: { post: unknown } };
 let path: {
   extname: (p: string) => string;
   basename: (p: string) => string;
   dirname: (p: string) => string;
-};
-let svgPreProcessor: {
-  loadSvgString: (
-    svg: string,
-    scale: number,
-  ) => { success: boolean; result: string };
 };
 
 /**
@@ -610,28 +602,6 @@ function initializeComponents(): void {
       readdirSync: (path: string) => string[];
     },
     path: path,
-    httpClient: axios.default as unknown as {
-      post: (
-        url: string,
-        data: Buffer,
-        options: { headers: Record<string, string>; responseType: string },
-      ) => Promise<{ data: string }>;
-    },
-    FormData: FormData as unknown as new () => {
-      append: (
-        name: string,
-        value: Buffer | string,
-        options?: { filename?: string; contentType?: string },
-      ) => void;
-      getBuffer: () => Buffer;
-      getHeaders: () => Record<string, string>;
-    },
-    svgPreProcessor: svgPreProcessor,
-    config: configService as unknown as {
-      getSync: <K extends keyof UIConfig>(
-        key?: K,
-      ) => K extends keyof UIConfig ? UIConfig[K] : UIConfig;
-    },
     deepNest: getDeepNest(),
     ractive:
       partsViewService.getRactive() as unknown as RactiveInstance<PartsViewData>,
@@ -654,39 +624,13 @@ function initializeComponents(): void {
     fs: fs as unknown as {
       writeFileSync: (path: string, data: string) => void;
     },
-    httpClient: axios.default as unknown as {
-      post: (
-        url: string,
-        data: Buffer,
-        options: { headers: Record<string, string>; responseType: string },
-      ) => Promise<{ data: string }>;
-    },
-    FormData: FormData as unknown as new () => {
-      append: (
-        name: string,
-        value: Buffer | string,
-        options?: { filename?: string; contentType?: string },
-      ) => void;
-      getBuffer: () => Buffer;
-      getHeaders: () => Record<string, string>;
-    },
     config: configService as unknown as {
       getSync: <K extends keyof UIConfig>(
         key?: K,
       ) => K extends keyof UIConfig ? UIConfig[K] : UIConfig;
     },
     deepNest: getDeepNest(),
-    // Note: exportButton set separately after initialization via setExportButton
   });
-
-  // Set export button after creation - HTMLElement already has className
-  const exportButton = getElement<HTMLElement>("#export");
-  if (exportButton) {
-    // Cast is safe: HTMLElement has className property which is what ExportButtonElement adds
-    exportService.setExportButton(
-      exportButton as HTMLElement & { className: string },
-    );
-  }
 
   // Initialize nesting service
   nestingService = createNestingService({
@@ -969,15 +913,6 @@ function initializeExportButtons(): void {
     };
   }
 
-  // DXF export
-  const exportDxfBtn = getElement<HTMLElement>("#exportdxf");
-  if (exportDxfBtn) {
-    exportDxfBtn.onclick = async () => {
-      await exportService.exportToDxf();
-      return false;
-    };
-  }
-
   // §9.3.7: Cut-list (text) export
   const exportCutListBtn = getElement<HTMLElement>("#exportcutlist");
   if (exportCutListBtn) {
@@ -1041,32 +976,10 @@ async function initialize(): Promise<void> {
     return;
   }
   try {
-    log("require form-data");
-    FormData = require("form-data") as typeof FormData;
-  } catch (e) {
-    fail("require('form-data')", e);
-    return;
-  }
-  try {
-    log("require axios");
-    axios = require("axios") as typeof axios;
-  } catch (e) {
-    fail("require('axios')", e);
-    return;
-  }
-  try {
     log("require path");
     path = require("path") as typeof path;
   } catch (e) {
     fail("require('path')", e);
-    return;
-  }
-  try {
-    log("require @deepnest/svg-preprocessor");
-    svgPreProcessor =
-      require("@deepnest/svg-preprocessor") as typeof svgPreProcessor;
-  } catch (e) {
-    fail("require('@deepnest/svg-preprocessor')", e);
     return;
   }
 

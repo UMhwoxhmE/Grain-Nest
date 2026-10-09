@@ -6,8 +6,6 @@
 import { Point } from '../build/util/point.js';
 import { HullPolygon } from '../build/util/HullPolygon.js';
 
-const { simplifyPolygon: simplifyPoly } = require("@deepnest/svg-preprocessor");
-
 var config = {
   clipperScale: 10000000,
   curveTolerance: 0.3,
@@ -223,7 +221,10 @@ export class DeepNest {
       }
     }
 
-    var simple = simplifyPoly(copy, tolerance, true);
+    // Ramer-Douglas-Peucker via util/simplify.js (simplify-js, BSD-2-Clause),
+    // loaded as a script in index.html. Until v1.5.1 this called the identical
+    // Rust port in @deepnest/svg-preprocessor.
+    var simple = window.simplify(copy, tolerance, true);
     // now a polygon again
     simple.pop();
 

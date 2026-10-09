@@ -63,12 +63,16 @@ Grain-Nest is a fork of
 of Jack Qiao's [SVGnest](https://github.com/Jack000/SVGnest) and
 [Deepnest](https://github.com/Jack000/Deepnest) (via the Dogthemachine and
 cmidgley forks). The nesting engine — the no-fit-polygon solver, the
-genetic algorithm and the SVG import — comes from those projects;
-Grain-Nest adds the grain and dressmaking features above.
+genetic algorithm and the SVG import — comes from those projects,
+including deepnest-next's `@deepnest/calculate-nfp` package; Grain-Nest
+adds the grain and dressmaking features above. Earlier versions also used
+deepnest-next's SVG preprocessor (`@deepnest/svg-preprocessor`) to clean
+up imported files.
 
 ## Licence
 
 Open source, with the licences of the projects it's built on: mostly MIT,
 with one module under the GNU GPL v3 and the geometry libraries under the
 Boost Software License. See [LICENSE](LICENSE) and
-[LICENSES.md](LICENSES.md).
+[LICENSES.md](LICENSES.md). The GPL part means the source code must stay
+available to everyone who gets the app; it is, in this repository.
