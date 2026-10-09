@@ -36,7 +36,7 @@ example pattern with its exported nest in [examples/](examples/).
 ## Install
 
 Download `grain-nest-v<version>-macos-arm64.dmg` from the latest
-[release](https://github.com/UMhwoxhmE/Grain-Nest/releases/latest), open it
+[release](https://github.com/cut-on-fold/Grain-Nest/releases/latest), open it
 and drag **Grain-Nest** onto **Applications**. The app isn't signed by
 Apple, so the first time macOS may refuse to open it: right-click the app
 → **Open**, or **System Settings → Privacy & Security → Open Anyway**.

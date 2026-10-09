@@ -14,10 +14,12 @@ const marked = require("marked");
 // The GitHub API answers this without a login because the repository is
 // public. If it fails (offline,
 // rate-limited, no releases) nothing is shown.
-const RELEASES_API = {
-    hostname: 'api.github.com',
-    path: '/repos/UMhwoxhmE/Grain-Nest/releases/latest',
-};
+//
+// v1.5.2: the repository's owner was renamed. GitHub answers requests
+// for the old name with a redirect, so the check follows redirects;
+// copies of the app built with the old name keep finding releases.
+const RELEASES_API = 'https://api.github.com/repos/cut-on-fold/Grain-Nest/releases/latest';
+const MAX_REDIRECTS = 3;
 
 /** Compare "1.2.10" with "1.3.0": positive when a is newer. */
 function compareVersions(a, b) {
@@ -62,27 +64,40 @@ class NotificationService {
     getLatestRelease() {
         return new Promise((resolve, reject) => {
             const options = {
-                ...RELEASES_API,
                 headers: { 'User-Agent': 'grain-nest-app/' + this.appVersion },
                 timeout: 10000,
             };
-            const req = https.get(options, (res) => {
-                let data = '';
-                res.on('data', (chunk) => (data += chunk));
-                res.on('end', () => {
-                    if (res.statusCode !== 200) {
-                        reject(new Error(`GitHub responded with status ${res.statusCode}`));
+            const get = (url, redirectsLeft) => {
+                const req = https.get(url, options, (res) => {
+                    const status = res.statusCode;
+                    const location = res.headers.location;
+                    if ((status === 301 || status === 302 || status === 307 || status === 308) && location) {
+                        res.resume();
+                        if (redirectsLeft <= 0) {
+                            reject(new Error('Too many redirects from GitHub'));
+                            return;
+                        }
+                        get(new URL(location, url), redirectsLeft - 1);
                         return;
                     }
-                    try {
-                        resolve(JSON.parse(data));
-                    } catch (err) {
-                        reject(new Error('Failed to parse release JSON'));
-                    }
+                    let data = '';
+                    res.on('data', (chunk) => (data += chunk));
+                    res.on('end', () => {
+                        if (status !== 200) {
+                            reject(new Error(`GitHub responded with status ${status}`));
+                            return;
+                        }
+                        try {
+                            resolve(JSON.parse(data));
+                        } catch (err) {
+                            reject(new Error('Failed to parse release JSON'));
+                        }
+                    });
                 });
-            });
-            req.on('timeout', () => req.destroy(new Error('Release check timed out')));
-            req.on('error', reject);
+                req.on('timeout', () => req.destroy(new Error('Release check timed out')));
+                req.on('error', reject);
+            };
+            get(new URL(RELEASES_API), MAX_REDIRECTS);
         });
     }
 

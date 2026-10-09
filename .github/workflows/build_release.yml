@@ -30,7 +30,7 @@ jobs:
     # Releases come only from the public Grain-Nest repository; in the
     # private Workshop copy this does nothing (and so does the step below,
     # which needs it).
-    if: github.repository == 'UMhwoxhmE/Grain-Nest'
+    if: github.repository == 'cut-on-fold/Grain-Nest'
     uses: ./.github/workflows/build.yml
 
   attach-to-release:

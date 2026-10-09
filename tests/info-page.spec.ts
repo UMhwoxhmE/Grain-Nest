@@ -28,7 +28,7 @@ test("Info tab fits the window and shows source and licences", async () => {
   expect(fit.right).toBeLessThanOrEqual(fit.windowWidth);
 
   await expect(
-    info.locator('a[href="https://github.com/UMhwoxhmE/Grain-Nest"]'),
+    info.locator('a[href="https://github.com/cut-on-fold/Grain-Nest"]'),
   ).toBeVisible();
   const text = (await info.innerText()).toLowerCase();
   for (const words of [

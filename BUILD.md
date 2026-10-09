@@ -41,7 +41,7 @@ See `.github/workflows/playwright.yml`:
 ## Building
 
 ```sh
-git clone https://github.com/UMhwoxhmE/Grain-Nest
+git clone https://github.com/cut-on-fold/Grain-Nest
 cd Grain-Nest
 npm install
 npm run build
