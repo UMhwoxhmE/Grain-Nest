@@ -1,23 +1,43 @@
 body,
 html {
-  /* Light theme variables */
-  --bg-primary: #f5f7f9;
+  /* Light theme variables — v1.4.0: the logo's palette (aubergine
+     #3B1F6E, spring leaf #9ED35B, moss #4F8A26, lilac white #F4F0FA) in
+     place of Deepnest's cyan. White text on aubergine reads clearly; white
+     on spring leaf does not, so spring leaf is only ever an accent. */
+  --bg-primary: #f4f0fa;
   --bg-secondary: #fff;
-  --text-primary: #404247;
-  --text-secondary: #818489;
-  --border-color: #e2e8ed;
-  --nav-bg: #404247;
-  --button-primary: #24c7ed;
-  --button-hover: #3eddf7;
+  --text-primary: #2b2236;
+  --text-secondary: #6f6680;
+  --border-color: #e4dcef;
+  --nav-bg: #3b1f6e;
+  --button-primary: #3b1f6e;
+  --button-hover: #553196;
+  --button-active: #2a1550;
   --table-bg: #fff;
-  --table-hover: #f5f7f9;
-  --table-active: #24c7ed;
-  --input-bg: #e2e8ed;
-  --input-border: #c8cedb;
-  --input-text: #7b879e;
+  --table-hover: #f4f0fa;
+  --table-active: #3b1f6e;
+  --input-bg: #ebe4f5;
+  --input-border: #d3c8e3;
+  --input-text: #5d5470;
   --message-bg: rgba(255, 255, 255, 0.9);
-  --nest-bg: #404247;
-  --progress-bg: #cdd8e0;
+  --nest-bg: #f4f0fa;
+  --nest-panel-bg: #f4f0fa;
+  --nest-topnav-bg: #e4dcef;
+  --nest-outline: #3b1f6e;
+  --nest-text: #3b1f6e;
+  --progress-bg: #e4dcef;
+  --accent: #9ed35b;
+  --accent-strong: #4f8a26;
+  --link: #4f8a26;
+  --heading: #3b1f6e;
+  --nav-active-bg: #2a1550;
+  --nav-hover-bg: #553196;
+  --home-tab-active-bg: #f4f0fa;
+  --scroll-track: #e4dcef;
+  --scroll-thumb: #8a76ad;
+  /* seam-allowance hatching in the nest preview: deeper on a light page */
+  --hatch-saturation: 60%;
+  --hatch-lightness: 45%;
 
   /* Default to light theme */
   background-color: var(--bg-primary);
@@ -39,23 +59,39 @@ html {
 
 /* Dark theme */
 body.dark-mode {
-  --bg-primary: #1a1a1a;
-  --bg-secondary: #2d2d2d;
-  --text-primary: #ffffff;
-  --text-secondary: #818489;
-  --border-color: #404040;
-  --nav-bg: #000000;
-  --button-primary: #1a98b8;
-  --button-hover: #1fb3d8;
-  --table-bg: #2d2d2d;
-  --table-hover: #3d3d3d;
-  --table-active: #1a98b8;
-  --input-bg: #3d3d3d;
-  --input-border: #505050;
-  --input-text: #ffffff;
-  --message-bg: rgba(45, 45, 45, 0.9);
-  --nest-bg: #1a1a1a;
-  --progress-bg: #404040;
+  --bg-primary: #17121f;
+  --bg-secondary: #231c2e;
+  --text-primary: #f4f0fa;
+  --text-secondary: #a59db3;
+  --border-color: #3a3047;
+  --nav-bg: #2b2236;
+  --button-primary: #4f8a26;
+  --button-hover: #5f9f30;
+  --button-active: #3f6f1e;
+  --table-bg: #231c2e;
+  --table-hover: #2f2640;
+  --table-active: #4f8a26;
+  --input-bg: #2f2640;
+  --input-border: #463a57;
+  --input-text: #f4f0fa;
+  --message-bg: rgba(35, 28, 46, 0.9);
+  --nest-bg: #17121f;
+  --nest-panel-bg: #2b2236;
+  --nest-topnav-bg: #231c2e;
+  --nest-outline: #ffffff;
+  --nest-text: #f4f0fa;
+  --progress-bg: #3a3047;
+  --accent: #9ed35b;
+  --accent-strong: #9ed35b;
+  --link: #9ed35b;
+  --heading: #9ed35b;
+  --nav-active-bg: #231c2e;
+  --nav-hover-bg: #2f2640;
+  --home-tab-active-bg: #231c2e;
+  --scroll-track: #2f2640;
+  --scroll-thumb: #4f8a26;
+  --hatch-saturation: 100%;
+  --hatch-lightness: 80%;
 }
 
 a {
@@ -2163,4 +2199,127 @@ body.dark-mode #presetName {
 /* v1.2.0: the sheet name box in the Add a sheet pop-up needs room. */
 #sheetdialog input#sheetname {
   width: 12em;
+}
+
+/* ------------------------------------------------------------------
+   v1.4.0: logo colours. These replace Deepnest's hard-coded cyan and
+   greys; the palette itself is in the theme variables at the top.
+   ------------------------------------------------------------------ */
+a {
+  color: var(--link);
+}
+.button,
+#parts .button,
+body.dark-mode .button,
+body.dark-mode #home .topnav li.button {
+  color: #fff;
+}
+.button:hover,
+#parts .button:hover {
+  background-color: var(--button-hover);
+}
+#parts .button:active {
+  background-color: var(--button-active);
+}
+.button.import.spinner,
+.button.export.spinner {
+  background-color: var(--button-primary);
+}
+#progressbar {
+  background-color: var(--accent);
+}
+li.progress circle.bar {
+  stroke: var(--accent-strong);
+}
+#sidenav li:hover {
+  background-color: var(--nav-hover-bg);
+}
+#sidenav li.active {
+  background-color: var(--nav-active-bg);
+  filter: none;
+  box-shadow: inset 4px 0 var(--accent);
+}
+#sidenav #home_tab.active {
+  background-color: var(--home-tab-active-bg);
+  box-shadow: inset 4px 0 var(--accent);
+}
+#info .info-text h1 {
+  color: var(--heading);
+}
+#parts table tbody tr.active td,
+#parts table tbody tr.active td select,
+#parts table tbody tr.active td a {
+  color: #fff;
+}
+#parts table tbody tr td .markgrain {
+  border-color: var(--accent-strong);
+}
+#parts table tbody tr td .markgrain:hover {
+  background-color: var(--accent-strong);
+}
+#parts table tbody tr.active td .markgrain {
+  color: #fff;
+  border-color: var(--accent);
+}
+#parts table tbody tr td select:focus {
+  outline-color: var(--accent-strong);
+}
+#config input[type="text"]:focus,
+#config input[type="number"]:focus {
+  border-color: var(--accent-strong);
+}
+#imports svg *.active {
+  stroke: var(--accent-strong) !important;
+}
+#grainmarker-banner {
+  background-color: var(--accent);
+  color: #3b1f6e;
+}
+.nest:hover {
+  border-color: var(--accent);
+}
+.nest .nest_length {
+  background: #3b1f6e;
+  color: #fff;
+}
+*::-webkit-scrollbar-track,
+*::-webkit-scrollbar-track:hover,
+*::-webkit-scrollbar-track:active {
+  background-color: var(--scroll-track);
+}
+*::-webkit-scrollbar-thumb,
+*::-webkit-scrollbar-thumb:hover,
+*::-webkit-scrollbar-thumb:active {
+  background-color: var(--scroll-thumb);
+}
+body.dark-mode #bins svg * {
+  fill: #2f2640 !important;
+  stroke: #463a57 !important;
+}
+
+/* Nest screen: a light page in light mode (pieces outlined in aubergine,
+   stats in aubergine); near-black in dark mode with the stats column in
+   the very dark aubergine. */
+#nest {
+  background: linear-gradient(
+    to right,
+    var(--nest-panel-bg) 25%,
+    var(--nest-bg) 25%
+  );
+}
+#nest .topnav {
+  background-color: var(--nest-topnav-bg);
+}
+#nestinfo,
+#nestinfo h1 {
+  color: var(--nest-text);
+}
+#nestdisplay svg g.part path,
+#nestdisplay svg g.part polygon,
+#nestdisplay svg g.part polyline,
+#nestdisplay svg g.part rect,
+#nestdisplay svg g.part circle,
+#nestdisplay svg g.part ellipse,
+#nestdisplay svg g.part line {
+  stroke: var(--nest-outline) !important;
 }

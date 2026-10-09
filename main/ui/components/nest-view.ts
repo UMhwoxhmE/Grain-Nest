@@ -341,7 +341,8 @@ export class NestViewService {
             const hue = 360 * (p.source / this.deepNest.parts.length);
             path.setAttribute(
               "style",
-              `stroke: hsl(${hue}, 100%, 80%) !important; stroke-width:1`,
+              // v1.4.0: deeper in light mode, pastel in dark (theme variables).
+              `stroke: hsl(${hue}, var(--hatch-saturation), var(--hatch-lightness)) !important; stroke-width:1`,
             );
             pattern.appendChild(path);
 
