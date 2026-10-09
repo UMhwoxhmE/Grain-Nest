@@ -47,6 +47,13 @@ export interface UIConfig extends DeepNestConfig {
   exportScalingBox: boolean;
   /** §9.3.8: side length of the calibration square, in inches (default 4) */
   exportScalingBoxSizeInches: number;
+  /** v1.5.0: width of every line in the SVG export, in mm (default 2). */
+  exportLineWidthMm?: number;
+  /** v1.5.0: export line colours, "#rrggbb". */
+  exportCutColour?: string;
+  exportSewColour?: string;
+  exportGrainColour?: string;
+  exportBorderColour?: string;
   /** §9.3.9 / phase-5r: default per-piece seam allowance in mm (default 12). */
   defaultSeamAllowanceMm?: number;
   /** v1.3.0: default seam allowance (mm) for knit projects. */
@@ -262,6 +269,8 @@ export interface DeepNestInstance {
    * §9.3.2 behaviour 3: undo foldPart, restoring the stored half polygon.
    */
   unfoldPart(partIndex: number): boolean;
+  /** v1.5.0: fold the piece along the outline edge nearest `point`. */
+  markFoldEdge(partIndex: number, point: { x: number; y: number }): boolean;
 
   /**
    * §9.3.9: offset (inset/expand) a polygon using ClipperLib. Negative

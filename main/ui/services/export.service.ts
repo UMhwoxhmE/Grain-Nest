@@ -9,12 +9,243 @@ import type {
   DeepNestInstance,
   SelectableNestingResult,
   Part,
-  SvgParserInstance,
 } from "../types/index.js";
 import { DEFAULT_CONVERSION_SERVER } from "../types/index.js";
 import { message } from "../utils/ui-helpers.js";
 import { foldReflectionTransform } from "../utils/dom-utils.js";
 import { toSvgUnits } from "../utils/conversion.js";
+
+const SVG_NS = "http://www.w3.org/2000/svg";
+const INKSCAPE_NS = "http://www.inkscape.org/namespaces/inkscape";
+const XMLNS_NS = "http://www.w3.org/2000/xmlns/";
+
+/** v1.5.0: line colours (hex) and width (drawing units) for the export. */
+interface ExportStyle {
+  scale: number;
+  width: number;
+  cut: string;
+  sew: string;
+  grain: string;
+  border: string;
+  line: (colour: string, dashed?: boolean) => string;
+}
+
+type Pt = { x: number; y: number };
+
+/** The bit of the global SvgParser the export uses. */
+interface SvgParserLike {
+  polygonify(element: SVGElement): Pt[];
+}
+
+/** Numbers in the export, trimmed to 3 decimals. */
+function round(n: number): string {
+  return String(Math.round(n * 1000) / 1000);
+}
+
+/** "14 Skirt Front C1OF" -> "14"; "INT1 Collar" -> "INT1"; else "". */
+function pieceNumber(name: string): string {
+  const m = /^\s*(INT ?\d+|\d+)/i.exec(name);
+  return m ? m[1].replace(" ", "") : "";
+}
+
+/** A name made safe for an SVG id. */
+function slug(text: string): string {
+  return text.replace(/[^A-Za-z0-9]+/g, "_").replace(/^_+|_+$/g, "") || "piece";
+}
+
+function polygonArea(ring: Pt[]): number {
+  let a = 0;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    a += (ring[j].x + ring[i].x) * (ring[j].y - ring[i].y);
+  }
+  return Math.abs(a / 2);
+}
+
+function pointInRing(ring: Pt[], p: Pt): boolean {
+  let inside = false;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const a = ring[i];
+    const b = ring[j];
+    if (
+      a.y > p.y !== b.y > p.y &&
+      p.x < ((b.x - a.x) * (p.y - a.y)) / (b.y - a.y) + a.x
+    ) {
+      inside = !inside;
+    }
+  }
+  return inside;
+}
+
+function distanceToRing(ring: Pt[], p: Pt): number {
+  let best = Infinity;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const a = ring[j];
+    const b = ring[i];
+    const dx = b.x - a.x;
+    const dy = b.y - a.y;
+    const len2 = dx * dx + dy * dy;
+    const t = len2
+      ? Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / len2))
+      : 0;
+    best = Math.min(
+      best,
+      Math.hypot(p.x - (a.x + t * dx), p.y - (a.y + t * dy)),
+    );
+  }
+  return best;
+}
+
+/**
+ * The point inside a polygon farthest from its edges (where a label has
+ * the most room), found by refining a grid of cells (the "polylabel" idea).
+ */
+function distanceToSegment(a: Pt, b: Pt, p: Pt): number {
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const len2 = dx * dx + dy * dy;
+  const t = len2
+    ? Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / len2))
+    : 0;
+  return Math.hypot(p.x - (a.x + t * dx), p.y - (a.y + t * dy));
+}
+
+function poleOfInaccessibility(ring: Pt[], obstacles: [Pt, Pt][] = []): Pt {
+  const xs = ring.map((p) => p.x);
+  const ys = ring.map((p) => p.y);
+  const minX = Math.min(...xs);
+  const minY = Math.min(...ys);
+  const w = Math.max(...xs) - minX;
+  const h = Math.max(...ys) - minY;
+  // Distance to the nearest edge or obstacle (the grain line), negative
+  // outside the piece.
+  const score = (p: Pt): number =>
+    (pointInRing(ring, p) ? 1 : -1) *
+    Math.min(
+      distanceToRing(ring, p),
+      ...obstacles.map(([a, b]) => distanceToSegment(a, b, p)),
+    );
+  let cell = Math.min(w, h) / 2 || 1;
+  let best = { x: minX + w / 2, y: minY + h / 2 };
+  let bestScore = score(best);
+  let cells: Pt[] = [];
+  for (let x = minX; x < minX + w; x += cell * 2) {
+    for (let y = minY; y < minY + h; y += cell * 2) {
+      cells.push({ x: x + cell, y: y + cell });
+    }
+  }
+  for (let pass = 0; pass < 12 && cells.length; pass++) {
+    const next: Pt[] = [];
+    for (const c of cells) {
+      const s = score(c);
+      if (s > bestScore) {
+        best = c;
+        bestScore = s;
+      }
+      // A cell can only beat the best if its centre score plus its
+      // half-diagonal does.
+      if (s + cell * Math.SQRT2 > bestScore) {
+        const q = cell / 2;
+        next.push(
+          { x: c.x - q, y: c.y - q },
+          { x: c.x + q, y: c.y - q },
+          { x: c.x - q, y: c.y + q },
+          { x: c.x + q, y: c.y + q },
+        );
+      }
+    }
+    cells = next.length > 4000 ? next.slice(0, 4000) : next;
+    cell /= 2;
+  }
+  return best;
+}
+
+/**
+ * Places worth trying for a label: the single roomiest point plus the
+ * roomiest points of a coarse grid over the piece, best first.
+ */
+function candidateCentres(ring: Pt[], obstacles: [Pt, Pt][]): Pt[] {
+  const xs = ring.map((p) => p.x);
+  const ys = ring.map((p) => p.y);
+  const minX = Math.min(...xs);
+  const minY = Math.min(...ys);
+  const w = Math.max(...xs) - minX;
+  const h = Math.max(...ys) - minY;
+  const n = 14;
+  const scored: { p: Pt; d: number }[] = [];
+  for (let i = 0; i < n; i++) {
+    for (let j = 0; j < n; j++) {
+      const p = {
+        x: minX + ((i + 0.5) * w) / n,
+        y: minY + ((j + 0.5) * h) / n,
+      };
+      if (!pointInRing(ring, p)) continue;
+      const d = Math.min(
+        distanceToRing(ring, p),
+        ...obstacles.map(([a, b]) => distanceToSegment(a, b, p)),
+      );
+      scored.push({ p, d });
+    }
+  }
+  scored.sort((a, b) => b.d - a.d);
+  return [
+    poleOfInaccessibility(ring, obstacles),
+    ...scored.slice(0, 12).map((s) => s.p),
+  ];
+}
+
+/**
+ * Does a w × h box centred on `c`, turned by `angle` degrees, fit inside
+ * the ring without touching any obstacle (kept `pad` clear)?
+ */
+function rectInside(
+  ring: Pt[],
+  c: Pt,
+  w: number,
+  h: number,
+  angle: number,
+  obstacles: [Pt, Pt][] = [],
+  pad = 0,
+): boolean {
+  const rad = (angle * Math.PI) / 180;
+  const cos = Math.cos(rad);
+  const sin = Math.sin(rad);
+  // Obstacles, in the box's own frame: no sample along them may come
+  // within `pad` of the box.
+  for (const [a, b] of obstacles) {
+    for (let i = 0; i <= 40; i++) {
+      const x = a.x + ((b.x - a.x) * i) / 40 - c.x;
+      const y = a.y + ((b.y - a.y) * i) / 40 - c.y;
+      const u = x * cos + y * sin;
+      const v = -x * sin + y * cos;
+      if (Math.abs(u) <= w / 2 + pad && Math.abs(v) <= h / 2 + pad)
+        return false;
+    }
+  }
+  const steps = 8;
+  for (let i = 0; i <= steps; i++) {
+    for (const [u, v] of [
+      [-w / 2 + (w * i) / steps, -h / 2],
+      [-w / 2 + (w * i) / steps, h / 2],
+      [-w / 2, -h / 2 + (h * i) / steps],
+      [w / 2, -h / 2 + (h * i) / steps],
+    ]) {
+      const p = { x: c.x + u * cos - v * sin, y: c.y + u * sin + v * cos };
+      if (!pointInRing(ring, p)) return false;
+    }
+  }
+  return true;
+}
+
+let measureContext: CanvasRenderingContext2D | null = null;
+/** Width of `text` in sans-serif at `size` drawing units. */
+function measureText(text: string, size: number): number {
+  if (!measureContext) {
+    measureContext = document.createElement("canvas").getContext("2d");
+  }
+  if (!measureContext) return text.length * size * 0.6;
+  measureContext.font = `100px sans-serif`;
+  return (measureContext.measureText(text).width / 100) * size;
+}
 
 /**
  * File filter options for the save dialog
@@ -174,9 +405,6 @@ export class ExportService {
   /** DeepNest instance for accessing parts and nests */
   private deepNest: DeepNestInstance | null = null;
 
-  /** SvgParser instance for line merging operations */
-  private svgParser: SvgParserInstance | null = null;
-
   /** Export button element for spinner state */
   private exportButton: ExportButtonElement | null = null;
 
@@ -195,7 +423,6 @@ export class ExportService {
     FormData?: FormDataConstructor;
     config?: ConfigGetter;
     deepNest?: DeepNestInstance;
-    svgParser?: SvgParserInstance;
     exportButton?: ExportButtonElement;
   }) {
     if (options) {
@@ -206,7 +433,6 @@ export class ExportService {
       this.FormData = options.FormData || null;
       this.config = options.config || null;
       this.deepNest = options.deepNest || null;
-      this.svgParser = options.svgParser || null;
       this.exportButton = options.exportButton || null;
     }
   }
@@ -265,14 +491,6 @@ export class ExportService {
    */
   setDeepNest(deepNest: DeepNestInstance): void {
     this.deepNest = deepNest;
-  }
-
-  /**
-   * Set the SvgParser instance for line merging operations
-   * @param svgParser - SvgParser instance
-   */
-  setSvgParser(svgParser: SvgParserInstance): void {
-    this.svgParser = svgParser;
   }
 
   /**
@@ -430,7 +648,7 @@ export class ExportService {
           mirrored: 0,
         };
         entry.total += 1;
-        if (part.mirror || part.isMirrorCopy) entry.mirrored += 1;
+        if (part.mirror) entry.mirrored += 1;
         pieceGroups.set(name, entry);
       }
     }
@@ -579,7 +797,7 @@ export class ExportService {
     }
 
     let fileName = this.dialog.showSaveDialogSync({
-      title: "Export deepnest SVG",
+      title: "Export SVG",
       filters: SVG_FILE_FILTERS,
     });
 
@@ -614,7 +832,7 @@ export class ExportService {
     }
 
     let fileName = this.dialog.showSaveDialogSync({
-      title: "Export deepnest DXF",
+      title: "Export DXF",
       filters: DXF_FILE_FILTERS,
     });
 
@@ -716,487 +934,458 @@ export class ExportService {
       throw new Error("DeepNest or config not available");
     }
 
-    const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-    let svgWidth = 0;
-    let svgHeight = 0;
-    let sheetNumber = 0;
-
-    // §9.3.9: sew lines are collected here during the placement loop and
-    // drawn after applyLineMerging (see below), so they bypass the
-    // flatten/split/merge/recolor pass that would otherwise strip their
-    // style and force them black + solid.
-    const sewJobs: Array<{
-      part: Part;
-      placement: { x: number; y: number; rotation: number; id: number | string };
-      offsetX: number;
-      offsetY: number;
-    }> = [];
+    // v1.5.0: the export is laid out like the pattern files it came from —
+    // Inkscape layers, one named group per piece holding that piece's cut
+    // line, sew line, grain line and name — with uniform line widths and
+    // the line colours from Settings.
+    const style = this.exportStyle();
+    const svg = document.createElementNS(SVG_NS, "svg");
+    svg.setAttributeNS(XMLNS_NS, "xmlns:inkscape", INKSCAPE_NS);
+    const ids = new Set<string>();
+    const uniqueId = (base: string): string => {
+      let id = base;
+      for (let n = 2; ids.has(id); n++) id = `${base}-${n}`;
+      ids.add(id);
+      return id;
+    };
 
     const parts = this.deepNest.parts;
+    const sheets = nestResult.placements as SheetGroup[];
     const exportWithSheetBoundaries = !!this.config.getSync(
       "exportWithSheetBoundboarders",
     );
-    const exportWithSheetsSpace = !!this.config.getSync(
-      "exportWithSheetsSpace",
-    );
-    const exportWithSheetsSpaceValue =
-      this.config.getSync("exportWithSheetsSpaceValue") || 0;
+    // The gap is stored in inches (Settings shows it in mm or inches); it
+    // used to be added as raw drawing units, i.e. ~1/96 of what was asked.
+    const sheetGap = this.config.getSync("exportWithSheetsSpace")
+      ? (Number(this.config.getSync("exportWithSheetsSpaceValue")) || 0) *
+        style.scale
+      : 0;
 
-    // Process each sheet placement
-    (nestResult.placements as SheetGroup[]).forEach((s) => {
-      sheetNumber++;
+    // The calibration square sits in a strip above the first sheet, inside
+    // the page (projection software shows only what's on the page) but
+    // clear of every piece, on a layer of its own that can be hidden.
+    const calibration = this.appendCalibrationLayer(svg, style, uniqueId);
+    let svgWidth = calibration.width;
+    let svgHeight = calibration.height;
 
-      const group = document.createElementNS("http://www.w3.org/2000/svg", "g");
-      svg.appendChild(group);
-
-      // Add sheet boundary if configured
-      if (exportWithSheetBoundaries) {
-        this.addSheetBoundary(group, parts[s.sheet]);
-      }
-
-      const sheetBounds = parts[s.sheet].bounds;
-
-      // Position the group
-      group.setAttribute(
+    sheets.forEach((s, sheetIndex) => {
+      const sheetPart = parts[s.sheet];
+      const sheetBounds = sheetPart.bounds;
+      const sheetName = (sheetPart.name || "").trim();
+      const layer = this.createLayer(
+        uniqueId(`layer-sheet-${sheetIndex + 1}`),
+        `Sheet ${sheetIndex + 1}` + (sheetName ? ` - ${sheetName}` : ""),
+      );
+      layer.setAttribute(
         "transform",
         `translate(${-sheetBounds.x} ${svgHeight - sheetBounds.y})`,
       );
+      svg.appendChild(layer);
 
-      // Track maximum width
-      if (svgWidth < sheetBounds.width) {
-        svgWidth = sheetBounds.width;
+      if (exportWithSheetBoundaries) {
+        const border = document.createElementNS(SVG_NS, "g");
+        border.setAttribute("id", uniqueId(`border-${sheetIndex + 1}`));
+        border.setAttributeNS(INKSCAPE_NS, "inkscape:label", "Sheet border");
+        sheetPart.svgelements.forEach((e) => {
+          const node = e.cloneNode(false) as Element;
+          node.removeAttribute("class");
+          node.setAttribute("style", style.line(style.border));
+          border.appendChild(node);
+        });
+        layer.appendChild(border);
       }
 
-      // Add each part placement
       s.sheetplacements.forEach((p) => {
-        const part = parts[p.source];
-        const partGroup = document.createElementNS(
-          "http://www.w3.org/2000/svg",
-          "g",
-        );
-
-        // Clone the given SVG elements from the part into a parent.
-        const appendElements = (
-          parent: Element,
-          elements: SVGElement[],
-        ): void => {
-          elements.forEach((e) => {
-            const node = e.cloneNode(false) as Element;
-
-            // Handle image elements with relative paths
-            if (node.tagName === "image") {
-              const relPath = node.getAttribute("data-href");
-              if (relPath) {
-                node.setAttribute("href", relPath);
-              }
-              node.removeAttribute("data-href");
-            }
-
-            parent.appendChild(node);
-          });
-        };
-
-        // §9.3.2 b3 / phase-5y: a cut-on-fold piece draws its visible cut
-        // OUTLINE separately, from the seamless doubled polygontree
-        // (appendFoldOutline, below) — so the fold edge no longer renders as
-        // an internal seam where the two halves used to meet. The partGroup
-        // then carries only the piece's interior MARKS (drill dots, notches,
-        // grain): every svgelement EXCEPT the root outline, which getParts
-        // pushes first. They're drawn once here and once reflected so the
-        // marks land on both halves. Non-fold pieces are unchanged — their
-        // full svgelements (outline included) are drawn as before.
-        const isFold = !!(part.cutOnFold && part.foldLine);
-        const bodyElements = isFold
-          ? part.svgelements.slice(1)
-          : part.svgelements;
-        appendElements(partGroup, bodyElements);
-
-        if (isFold && part.foldLine) {
-          const foldGroup = document.createElementNS(
-            "http://www.w3.org/2000/svg",
-            "g",
-          );
-          foldGroup.setAttribute(
-            "transform",
-            foldReflectionTransform(part.foldLine),
-          );
-          appendElements(foldGroup, bodyElements);
-          partGroup.appendChild(foldGroup);
-        }
-
-        group.appendChild(partGroup);
-
-        // Position and rotate the part. SVG transforms compose
-        // right-to-left, so the rightmost transform applies first in
-        // the piece's local frame: mirror first (if any), then rotate,
-        // then translate to the sheet position.
-        // §9.3.2: when part.mirror is true, append a `scale(-1, 1)`
-        // about the bounds-centre vertical axis as the last (innermost)
-        // transform.
-        let transform = `translate(${p.x} ${p.y}) rotate(${p.rotation})`;
-        if (part.mirror) {
-          const cx = part.bounds.x + part.bounds.width / 2;
-          transform += ` translate(${2 * cx} 0) scale(-1 1)`;
-        }
-        partGroup.setAttribute("transform", transform);
-        partGroup.setAttribute("id", String(p.id));
-
-        // §9.3.2 b3 / phase-5y: draw the seamless doubled cut outline for a
-        // cut-on-fold piece from its baked polygontree (already fold- AND
-        // mirror-baked, exactly like the sew line below), positioned by the
-        // placement translate+rotate only — never the render-time mirror /
-        // fold reflection partGroup gets. This is the single unioned outline
-        // that replaces the two halves meeting at the fold seam.
-        if (isFold) {
-          this.appendFoldOutline(group, part, p);
-        }
-
-        // §9.3.9: record this piece's sew line; it's drawn after
-        // line-merging (below). polygontree is already mirror/fold-baked,
-        // so it needs only the sheet offset + the placement translate+
-        // rotate, never the mirror/fold transforms applied to partGroup.
-        sewJobs.push({
-          part,
-          placement: p,
-          offsetX: -sheetBounds.x,
-          offsetY: svgHeight - sheetBounds.y,
-        });
+        layer.appendChild(this.pieceGroup(parts[p.source], p, style, uniqueId));
       });
 
-      // Update height for next sheet
+      svgWidth = Math.max(svgWidth, sheetBounds.width);
       svgHeight += sheetBounds.height;
-
-      // Add spacing between sheets (except after last sheet)
-      if (
-        exportWithSheetsSpace &&
-        sheetNumber < (nestResult.placements as SheetGroup[]).length
-      ) {
-        svgHeight += exportWithSheetsSpaceValue;
-      }
+      if (sheetIndex < sheets.length - 1) svgHeight += sheetGap;
     });
 
-    // §9.3.8: append the calibration box (and its label) if enabled.
-    // Returns the new extents the SVG must accommodate so the box
-    // doesn't get clipped by applyDimensions's viewBox computation.
-    const boxExtents = this.appendCalibrationBox(svg);
-    if (boxExtents.right > svgWidth) svgWidth = boxExtents.right;
-    if (boxExtents.bottom > svgHeight) svgHeight = boxExtents.bottom;
-
-    // Calculate final dimensions with scaling
     this.applyDimensions(svg, svgWidth, svgHeight, options);
-
-    // Apply line merging if configured
-    this.applyLineMerging(svg, nestResult);
-
-    // §9.3.9: draw sew lines now — AFTER line-merging — so they bypass its
-    // flatten/split/merge/recolor pass (which strips group styles and forces
-    // every path black + solid). Positioned by sheet offset + placement,
-    // matching where each piece was drawn.
-    sewJobs.forEach((job) => {
-      this.appendSewLineLayer(
-        svg,
-        job.part,
-        job.placement,
-        job.offsetX,
-        job.offsetY,
-      );
-    });
-
-    // §9.3.12 / phase-5v: draw piece-name labels last (after line-merging, like
-    // the sew lines) so the text isn't swept into the recolor/merge pass.
-    // Reuses the per-placement jobs collected during the placement loop.
-    sewJobs.forEach((job) => {
-      this.appendPieceNameLabel(
-        svg,
-        job.part,
-        job.placement,
-        job.offsetX,
-        job.offsetY,
-      );
-    });
-
     return new XMLSerializer().serializeToString(svg);
   }
 
-  /**
-   * §9.3.2 b3 / phase-5y: draw a cut-on-fold piece's seamless doubled cut
-   * outline from its baked `polygontree` (the half reflected across the fold
-   * line and unioned — see deepnest.js foldPart). Drawing the union as a
-   * single path means the fold edge, now interior to the doubled shape, is
-   * never stroked: the export shows the one "open-out" outline you actually
-   * cut, not two half-outlines meeting at a seam.
-   *
-   * Coordinate frame matches appendSewLineLayer: `polygontree` is already
-   * fold- AND mirror-baked, so the group composes only the placement
-   * translate+rotate (its parent per-sheet group supplies the sheet offset),
-   * never the render-time `scale(-1 1)` / fold reflection the svgelements
-   * partGroup gets. Appended before applyLineMerging, so when merging is on it
-   * is flattened/recoloured into the cut lines like every other outline; the
-   * explicit style only takes effect when merging is off.
-   */
-  private appendFoldOutline(
-    parent: Element,
-    part: Part,
-    placement: { x: number; y: number; rotation: number },
-  ): void {
-    if (!part.polygontree || part.polygontree.length < 3) return;
-
-    const style = "fill:none;stroke:#000000;stroke-width:1";
-    const group = document.createElementNS(
-      "http://www.w3.org/2000/svg",
-      "g",
-    );
-    group.setAttribute("class", "grainnest-foldoutline");
-
-    const appendRing = (ring: { x: number; y: number }[]): void => {
-      if (!ring || ring.length < 3) return;
-      let d = `M ${ring[0].x} ${ring[0].y}`;
-      for (let i = 1; i < ring.length; i++) {
-        d += ` L ${ring[i].x} ${ring[i].y}`;
-      }
-      d += " Z";
-      const path = document.createElementNS(
-        "http://www.w3.org/2000/svg",
-        "path",
-      );
-      path.setAttribute("d", d);
-      path.setAttribute("style", style);
-      group.appendChild(path);
+  /** v1.5.0: export line colours / width from Settings, in drawing units. */
+  private exportStyle(): ExportStyle {
+    const cfg = this.config!.getSync() as unknown as UIConfig;
+    const scale = Number(cfg.scale) || 96;
+    const widthMm = Number(cfg.exportLineWidthMm) || 2;
+    const width = (widthMm * scale) / 25.4;
+    const colour = (v: unknown, fallback: string): string =>
+      typeof v === "string" && /^#[0-9a-fA-F]{6}$/.test(v) ? v : fallback;
+    return {
+      scale,
+      width,
+      cut: colour(cfg.exportCutColour, "#3b1f6e"),
+      sew: colour(cfg.exportSewColour, "#4f8a26"),
+      grain: colour(cfg.exportGrainColour, "#4f8a26"),
+      border: colour(cfg.exportBorderColour, "#ffffff"),
+      line: (c: string, dashed = false): string =>
+        `fill:none;stroke:${c};stroke-width:${round(width)};` +
+        `stroke-linecap:round;stroke-linejoin:round` +
+        (dashed
+          ? `;stroke-dasharray:${round(width * 3)},${round(width * 2)}`
+          : ""),
     };
+  }
 
-    // Outer ring plus any genuine holes. (For a non-sheet dressmaking piece
-    // phase-5u already empties polygontree.children, so this is normally just
-    // the one outer ring — but draw children defensively if present.)
-    appendRing(part.polygontree);
-    (part.polygontree.children || []).forEach(appendRing);
+  private createLayer(id: string, label: string): SVGGElement {
+    const layer = document.createElementNS(SVG_NS, "g");
+    layer.setAttribute("id", id);
+    layer.setAttributeNS(INKSCAPE_NS, "inkscape:groupmode", "layer");
+    layer.setAttributeNS(INKSCAPE_NS, "inkscape:label", label);
+    return layer;
+  }
 
+  /**
+   * v1.5.0: one placed piece as a named group, like a piece group in the
+   * pattern file: cut line, sew line, grain line and name inside it,
+   * labelled "<name>", "sew-<n>", "grain-<n>" and "name-<n>" where <n> is
+   * the piece number from its name (e.g. 14 for "14 Skirt Front C1OF").
+   *
+   * Frames: the group carries the placement (translate + rotate). The cut
+   * and grain lines are the imported elements in their own frame, so they
+   * get the mirror flip (and, for a cut-on-fold piece, the fold reflection)
+   * on top; the sew line and the fold outline come from the nesting
+   * polygon, which is already mirror- and fold-baked.
+   */
+  private pieceGroup(
+    part: Part,
+    placement: { x: number; y: number; rotation: number; id: number | string },
+    style: ExportStyle,
+    uniqueId: (base: string) => string,
+  ): SVGGElement {
+    const name = (part.name || "").trim();
+    const num = pieceNumber(name) || `piece${String(placement.id)}`;
+    const mirrored = !!part.mirror;
+    const label =
+      (name || `Piece ${String(placement.id)}`) +
+      (mirrored ? " (mirrored)" : "");
+
+    const group = document.createElementNS(SVG_NS, "g");
+    group.setAttribute("id", uniqueId(`group-${slug(label)}`));
+    group.setAttributeNS(INKSCAPE_NS, "inkscape:label", label);
     group.setAttribute(
       "transform",
       `translate(${placement.x} ${placement.y}) rotate(${placement.rotation})`,
     );
-    parent.appendChild(group);
+
+    const mirrorTransform = part.mirror
+      ? `translate(${2 * (part.bounds.x + part.bounds.width / 2)} 0) scale(-1 1)`
+      : "";
+    const isFold = !!(part.cutOnFold && part.foldLine);
+    const isGrain = (e: Element): boolean =>
+      e.getAttribute("data-grainnest-grain") === "1";
+    const clone = (e: SVGElement, lineStyle: string): Element => {
+      const node = e.cloneNode(false) as Element;
+      if (node.tagName === "image") {
+        const relPath = node.getAttribute("data-href");
+        if (relPath) node.setAttribute("href", relPath);
+        node.removeAttribute("data-href");
+      } else {
+        node.setAttribute("style", lineStyle);
+      }
+      node.removeAttribute("class"); // selection state ("active") etc.
+      node.removeAttribute("id");
+      node.removeAttributeNS(INKSCAPE_NS, "label");
+      node.removeAttribute("inkscape:label");
+      return node;
+    };
+
+    // Cut line: the outline plus any other marks attached to the piece
+    // (notches, holes), all in the cut-line colour.
+    const cut = document.createElementNS(SVG_NS, "g");
+    cut.setAttribute("id", uniqueId(`cut-${num}`));
+    cut.setAttributeNS(INKSCAPE_NS, "inkscape:label", `cut-${num}`);
+    const marks = part.svgelements.filter((e) => !isGrain(e));
+    const grains = part.svgelements.filter((e) => isGrain(e));
+    if (isFold && part.foldLine) {
+      // One seamless outline from the doubled polygon (no line along the
+      // fold), plus the marks drawn on both halves.
+      cut.appendChild(
+        this.polygonPath(part.polygontree, style.line(style.cut)),
+      );
+      const own = document.createElementNS(SVG_NS, "g");
+      const reflected = document.createElementNS(SVG_NS, "g");
+      reflected.setAttribute(
+        "transform",
+        foldReflectionTransform(part.foldLine),
+      );
+      marks.slice(1).forEach((e) => {
+        own.appendChild(clone(e, style.line(style.cut)));
+        reflected.appendChild(clone(e, style.line(style.cut)));
+      });
+      if (mirrorTransform) own.setAttribute("transform", mirrorTransform);
+      if (mirrorTransform)
+        reflected.setAttribute(
+          "transform",
+          `${mirrorTransform} ${foldReflectionTransform(part.foldLine)}`,
+        );
+      if (own.childNodes.length) cut.appendChild(own);
+      if (reflected.childNodes.length) cut.appendChild(reflected);
+    } else {
+      if (mirrorTransform) cut.setAttribute("transform", mirrorTransform);
+      marks.forEach((e) => cut.appendChild(clone(e, style.line(style.cut))));
+    }
+    group.appendChild(cut);
+
+    // Sew line: the nesting polygon inset by the seam allowance, dashed.
+    const sew = this.sewLinePath(part, style);
+    if (sew) {
+      sew.setAttribute("id", uniqueId(`sew-${num}`));
+      sew.setAttributeNS(INKSCAPE_NS, "inkscape:label", `sew-${num}`);
+      group.appendChild(sew);
+    }
+
+    // Grain line: solid, so it reads apart from the dashed sew line.
+    grains.forEach((e) => {
+      const node = clone(e, style.line(style.grain));
+      node.setAttribute("id", uniqueId(`grain-${num}`));
+      node.setAttributeNS(INKSCAPE_NS, "inkscape:label", `grain-${num}`);
+      if (mirrorTransform) node.setAttribute("transform", mirrorTransform);
+      group.appendChild(node);
+    });
+
+    const text = this.pieceNameText(part, placement.rotation, name, style);
+    if (text) {
+      text.setAttribute("id", uniqueId(`name-${num}`));
+      text.setAttributeNS(INKSCAPE_NS, "inkscape:label", `name-${num}`);
+      group.appendChild(text);
+    }
+    return group;
+  }
+
+  /** A closed path through a polygon ring (and its holes). */
+  private polygonPath(
+    ring: { x: number; y: number }[] & {
+      children?: { x: number; y: number }[][];
+    },
+    lineStyle: string,
+  ): SVGPathElement {
+    const rings = [ring, ...(ring.children || [])].filter(
+      (r) => r && r.length >= 3,
+    );
+    const d = rings
+      .map(
+        (r) =>
+          `M ${round(r[0].x)} ${round(r[0].y)} ` +
+          r
+            .slice(1)
+            .map((pt) => `L ${round(pt.x)} ${round(pt.y)}`)
+            .join(" ") +
+          " Z",
+      )
+      .join(" ");
+    const path = document.createElementNS(SVG_NS, "path");
+    path.setAttribute("d", d);
+    path.setAttribute("style", lineStyle);
+    return path;
   }
 
   /**
-   * §9.3.9: draw a piece's sew line (seam allowance) onto `svgRoot` as its
-   * own dashed layer — the nesting polygon (`polygontree`) inset inward by
-   * the allowance. Called AFTER applyLineMerging, so it sidesteps the
-   * flatten/split/merge/recolor pass that would strip its style (the cut
-   * lines and grain marks have already been merged/recoloured by then).
-   *
-   * Coordinate frame: `polygontree` is in the piece's baked frame — already
-   * mirrored for mirrored pieces and already doubled for cut-on-fold — so
-   * the sew group composes only the sheet offset and the placement
-   * translate+rotate, never the `scale(-1 1)` mirror / fold reflection the
-   * `svgelements` partGroup gets. That reproduces exactly where the polygon
-   * was nested, which is where the cut outline lands too.
+   * §9.3.9: the sew line — the nesting polygon inset by the piece's seam
+   * allowance (mm). Null when there's no allowance or it swallows the piece.
    */
-  private appendSewLineLayer(
-    svgRoot: Element,
-    part: Part,
-    placement: { x: number; y: number; rotation: number; id: number | string },
-    offsetX: number,
-    offsetY: number,
-  ): void {
-    if (!this.deepNest || !this.config) return;
+  private sewLinePath(part: Part, style: ExportStyle): SVGPathElement | null {
     const mm = part.seamAllowance;
-    if (!mm || mm <= 0 || !part.polygontree) return;
-
-    const scale = Number(this.config.getSync("scale")) || 72;
-    const svgUnits = toSvgUnits(mm, scale, "mm");
-    if (!(svgUnits > 0)) return;
-
-    // Negative offset insets the polygon toward its interior.
+    if (!this.deepNest || !mm || mm <= 0 || !part.polygontree) return null;
+    const svgUnits = toSvgUnits(mm, style.scale, "mm");
+    if (!(svgUnits > 0)) return null;
     const insets = this.deepNest.polygonOffset(part.polygontree, -svgUnits);
     if (!insets || insets.length === 0) {
       console.warn(
-        `[grainnest] sew line: ${mm}mm allowance collapses piece ` +
-          `${String(placement.id)} — skipped`,
+        `[grainnest] sew line: ${mm}mm allowance collapses ${part.name || "a piece"} — skipped`,
       );
-      return;
+      return null;
     }
-
-    const sewStyle =
-      "fill:none;stroke:#d6336c;stroke-width:1;stroke-dasharray:6 3";
-    const sewGroup = document.createElementNS(
-      "http://www.w3.org/2000/svg",
-      "g",
-    );
-    sewGroup.setAttribute("class", "grainnest-sewline");
-    sewGroup.setAttribute("data-grainnest-sewline", "1");
-    sewGroup.setAttribute("id", `sew-${String(placement.id)}`);
-    sewGroup.setAttribute("style", sewStyle);
-
-    insets.forEach((ring) => {
-      if (!ring || ring.length < 3) return;
-      let d = `M ${ring[0].x} ${ring[0].y}`;
-      for (let i = 1; i < ring.length; i++) {
-        d += ` L ${ring[i].x} ${ring[i].y}`;
-      }
-      d += " Z";
-      const path = document.createElementNS(
-        "http://www.w3.org/2000/svg",
-        "path",
-      );
-      path.setAttribute("d", d);
-      path.setAttribute("style", sewStyle);
-      sewGroup.appendChild(path);
-    });
-
-    sewGroup.setAttribute(
-      "transform",
-      `translate(${offsetX} ${offsetY}) translate(${placement.x} ${placement.y}) rotate(${placement.rotation})`,
-    );
-    svgRoot.appendChild(sewGroup);
+    const outer = insets[0] as { x: number; y: number }[] & {
+      children?: { x: number; y: number }[][];
+    };
+    outer.children = insets.slice(1);
+    return this.polygonPath(outer, style.line(style.sew, true));
   }
 
   /**
-   * §9.3.12 / phase-5v: draw a placed piece's name as an upright `<text>`
-   * centred on the piece, so the exported nest is self-labelling (testing round
-   * 5). Called AFTER applyLineMerging, like the sew line, so it sidesteps the
-   * flatten/recolor pass.
-   *
-   * Position: the centre of `part.bounds` (the mirror/fold-baked polygon
-   * bounds) transformed to sheet coordinates by the same offset + placement
-   * translate+rotate the sew line uses — but we compute the final point and
-   * leave the text unrotated, so it reads upright on pieces nested at any angle.
-   * Name = `part.name` (+ " (mirrored)" for a mirrored piece, matching the
-   * cut-list). Unnamed pieces get no label.
+   * The piece's grain line(s) as segments in the same frame as its nesting
+   * polygon (mirrored pieces flipped), so names can keep off them.
    */
-  private appendPieceNameLabel(
-    svgRoot: Element,
-    part: Part,
-    placement: { x: number; y: number; rotation: number; id: number | string },
-    offsetX: number,
-    offsetY: number,
-  ): void {
-    if (!part.polygontree || !part.bounds) return;
-    let label = (part.name || "").trim();
-    if (!label) return;
-    if (part.mirror || part.isMirrorCopy) label += " (mirrored)";
-
+  private grainSegments(part: Part): [Pt, Pt][] {
+    const parser = (window as unknown as { SvgParser?: SvgParserLike })
+      .SvgParser;
+    if (!parser) return [];
     const cx = part.bounds.x + part.bounds.width / 2;
-    const cy = part.bounds.y + part.bounds.height / 2;
-    const rad = (placement.rotation * Math.PI) / 180;
-    const cos = Math.cos(rad);
-    const sin = Math.sin(rad);
-    const x = offsetX + placement.x + cx * cos - cy * sin;
-    const y = offsetY + placement.y + cx * sin + cy * cos;
+    const out: [Pt, Pt][] = [];
+    part.svgelements
+      .filter((e) => e.getAttribute("data-grainnest-grain") === "1")
+      .forEach((e) => {
+        let pts: Pt[] = [];
+        try {
+          pts = parser.polygonify(e) || [];
+        } catch {
+          pts = [];
+        }
+        if (pts.length < 2) return;
+        const flip = (p: Pt): Pt =>
+          part.mirror ? { x: 2 * cx - p.x, y: p.y } : { x: p.x, y: p.y };
+        out.push([flip(pts[0]), flip(pts[pts.length - 1])]);
+      });
+    return out;
+  }
 
-    // Readable but not overwhelming: proportional to the piece, clamped.
-    const fontSize = Math.max(
-      24,
-      Math.min(60, Math.min(part.bounds.width, part.bounds.height) * 0.15),
+  /**
+   * v1.5.0: the piece name, placed where the piece has the most room (the
+   * point deepest inside it) and kept clear of the cut line, so it no longer
+   * spills over thin pieces or covers notches. Upright if it fits, else
+   * turned to run along a tall thin piece; shrunk to fit; if even the
+   * smallest size won't fit, just the piece number ("14"); else nothing.
+   */
+  private pieceNameText(
+    part: Part,
+    rotation: number,
+    name: string,
+    style: ExportStyle,
+  ): SVGTextElement | null {
+    if (!name || !this.deepNest || !part.polygontree) return null;
+    const mmToUnits = style.scale / 25.4;
+    // Keep text this far inside the cut line: clear of notches (~6 mm deep)
+    // and of the sew line.
+    const clearance = Math.max(8, (part.seamAllowance || 0) + 3) * mmToUnits;
+    const inner = this.deepNest.polygonOffset(part.polygontree, -clearance);
+    if (!inner || inner.length === 0) return null;
+    const room = inner.reduce((a, b) =>
+      polygonArea(b) > polygonArea(a) ? b : a,
     );
+    if (room.length < 3) return null;
+    const grains = this.grainSegments(part);
+    const pad = 2 * mmToUnits;
+    const label = name + (part.mirror ? " (mirrored)" : "");
+    const number = pieceNumber(name);
+    const maxSize = 16 * mmToUnits;
+    const minSize = 4 * mmToUnits;
+    const step = 0.5 * mmToUnits;
+    // Best first: the full name clear of the grain line; then over it (a
+    // name across the grain line beats no name); then just the number.
+    const texts = number && number !== label ? [label, number] : [label];
+    const attempts = texts.flatMap((text) =>
+      grains.length
+        ? [
+            { text, obstacles: grains },
+            { text, obstacles: [] as [Pt, Pt][] },
+          ]
+        : [{ text, obstacles: [] as [Pt, Pt][] }],
+    );
+    for (const { text, obstacles } of attempts) {
+      // Try the roomiest spots and keep the one that takes the biggest text
+      // (upright on the sheet, or turned a quarter to read up a tall thin
+      // piece — angles are in the piece's frame, so cancel its rotation).
+      let best: { size: number; centre: Pt; angle: number } | null = null;
+      for (const centre of candidateCentres(room, obstacles)) {
+        for (const turn of [0, -90]) {
+          const angle = -rotation + turn;
+          const fits = (size: number): boolean =>
+            rectInside(
+              room,
+              centre,
+              measureText(text, size),
+              size,
+              angle,
+              obstacles,
+              pad,
+            );
+          if (!fits(minSize)) continue;
+          let lo = minSize;
+          let hi = maxSize;
+          if (fits(hi)) lo = hi;
+          while (hi - lo > step) {
+            const mid = (lo + hi) / 2;
+            if (fits(mid)) lo = mid;
+            else hi = mid;
+          }
+          // Prefer upright text unless turning it buys a clearly bigger size.
+          const score = turn === 0 ? lo * 1.25 : lo;
+          if (!best || score > best.size) best = { size: score, centre, angle };
+        }
+      }
+      if (best) {
+        const size = Math.min(
+          maxSize,
+          Math.abs(best.angle + rotation) < 1e-9 ? best.size / 1.25 : best.size,
+        );
+        const t = document.createElementNS(SVG_NS, "text");
+        t.setAttribute(
+          "transform",
+          `translate(${round(best.centre.x)} ${round(best.centre.y)}) rotate(${round(best.angle)})`,
+        );
+        t.setAttribute("text-anchor", "middle");
+        t.setAttribute("dominant-baseline", "central");
+        t.setAttribute(
+          "style",
+          `font-family:sans-serif;font-size:${round(size)}px;fill:${style.cut};stroke:none`,
+        );
+        t.textContent = text;
+        return t;
+      }
+    }
+    return null;
+  }
 
-    const text = document.createElementNS(
-      "http://www.w3.org/2000/svg",
-      "text",
+  /**
+   * §9.3.8 / v1.5.0: the calibration square and its label on a layer of
+   * their own, in a strip at the top of the page above the first sheet, so
+   * they're on the page but never over a piece. Returns the strip's size
+   * (0 × 0 when the square is switched off).
+   */
+  private appendCalibrationLayer(
+    svg: SVGElement,
+    style: ExportStyle,
+    uniqueId: (base: string) => string,
+  ): { width: number; height: number } {
+    if (!this.config || !this.config.getSync("exportScalingBox")) {
+      return { width: 0, height: 0 };
+    }
+    const cfg = this.config.getSync() as unknown as UIConfig;
+    const sizeIn = Number(cfg.exportScalingBoxSizeInches) || 4;
+    const size = style.scale * sizeIn;
+    const margin = style.scale * 0.5;
+    const labelSize = style.scale * 0.25;
+
+    const layer = this.createLayer(
+      uniqueId("layer-calibration"),
+      "Calibration",
     );
-    text.setAttribute("x", String(x));
-    text.setAttribute("y", String(y));
-    text.setAttribute("text-anchor", "middle");
-    text.setAttribute("dominant-baseline", "middle");
-    text.setAttribute("class", "grainnest-piecename");
-    text.setAttribute("data-grainnest-piecename", "1");
-    // White halo (paint-order:stroke) keeps the black text legible over the
-    // piece's hatching and grain marks.
+    const rect = document.createElementNS(SVG_NS, "rect");
+    rect.setAttribute("id", uniqueId("calibration-square"));
+    rect.setAttributeNS(INKSCAPE_NS, "inkscape:label", "calibration-square");
+    rect.setAttribute("x", round(margin));
+    rect.setAttribute("y", round(margin));
+    rect.setAttribute("width", round(size));
+    rect.setAttribute("height", round(size));
+    rect.setAttribute("style", style.line(style.cut));
+    layer.appendChild(rect);
+
+    const mm = Math.round(sizeIn * 25.4 * 10) / 10;
+    const text = document.createElementNS(SVG_NS, "text");
+    text.setAttribute("id", uniqueId("calibration-label"));
+    text.setAttributeNS(INKSCAPE_NS, "inkscape:label", "calibration-label");
+    text.setAttribute("x", round(margin * 2 + size));
+    text.setAttribute("y", round(margin + labelSize));
     text.setAttribute(
       "style",
-      `font-family:sans-serif;font-size:${fontSize}px;fill:#111111;` +
-        `paint-order:stroke;stroke:#ffffff;stroke-width:${fontSize * 0.12};` +
-        `stroke-linejoin:round`,
+      `font-family:sans-serif;font-size:${round(labelSize)}px;fill:${style.cut};stroke:none`,
     );
-    text.textContent = label;
-    svgRoot.appendChild(text);
-  }
-
-  /**
-   * §9.3.8: append a calibration rectangle (and a one-line label) to
-   * the export SVG so the user can verify print/projection scale with
-   * a ruler. Reads `exportScalingBox` and `exportScalingBoxSizeInches`
-   * from config; no-op when the toggle is off.
-   *
-   * Returns the bottom-right SVG-unit corner of whatever was added so
-   * the caller can grow the export viewBox to include it. Returns
-   * {right:0, bottom:0} if nothing was added.
-   *
-   * Box position: top-left of the export viewport with a half-inch
-   * margin. Fixed position keeps v1 simple; configurable position
-   * would need a UI control and isn't worth the complexity yet.
-   */
-  private appendCalibrationBox(svg: SVGElement): {
-    right: number;
-    bottom: number;
-  } {
-    if (!this.config) return { right: 0, bottom: 0 };
-    const enabled = !!this.config.getSync("exportScalingBox");
-    if (!enabled) return { right: 0, bottom: 0 };
-
-    // Pull scale = SVG units per inch (whatever the user has it set
-    // to). Default 72 means a 4-inch box is 288 SVG units wide.
-    const cfg = this.config.getSync() as unknown as UIConfig;
-    const scale = cfg.scale || 72;
-    const sizeIn = cfg.exportScalingBoxSizeInches || 4;
-    const sizeSvg = scale * sizeIn;
-    const marginSvg = scale * 0.5;
-    const labelHeightSvg = scale * 0.2;
-
-    // Box: stroked rect at (margin, margin). No fill so it doesn't
-    // print solid ink and obscure anything if it overlaps a piece.
-    // `vector-effect="non-scaling-stroke"` keeps the stroke at its
-    // configured pixel width regardless of viewer zoom — without it,
-    // a 0.72-SVG-unit stroke disappears in any browser preview that
-    // fits-to-page (reported 2026-05-19 round-1 testing). Stroke is
-    // also bumped from scale*0.01 to scale*0.02 so even printing
-    // pipelines that drop vector-effect still produce a visible box.
-    const rect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
-    rect.setAttribute("x", String(marginSvg));
-    rect.setAttribute("y", String(marginSvg));
-    rect.setAttribute("width", String(sizeSvg));
-    rect.setAttribute("height", String(sizeSvg));
-    rect.setAttribute("fill", "none");
-    rect.setAttribute("stroke", "#000");
-    rect.setAttribute("stroke-width", String(scale * 0.02));
-    rect.setAttribute("vector-effect", "non-scaling-stroke");
-    svg.appendChild(rect);
-
-    // Label below the box. Always in inches (the unit the size is
-    // measured in) so the printed reference number always matches
-    // the actual box even if the user's display units differ.
-    const label = document.createElementNS(
-      "http://www.w3.org/2000/svg",
-      "text",
-    );
-    label.setAttribute("x", String(marginSvg));
-    label.setAttribute(
-      "y",
-      String(marginSvg + sizeSvg + labelHeightSvg + scale * 0.05),
-    );
-    label.setAttribute("font-size", String(labelHeightSvg));
-    label.setAttribute("font-family", "sans-serif");
-    label.setAttribute("fill", "#000");
-    label.textContent = `${sizeIn}in calibration — measure to check scale`;
-    svg.appendChild(label);
+    const inches = Math.round(sizeIn * 100) / 100;
+    text.textContent = `${inches} in (${mm} mm) square: measure to check the scale`;
+    layer.appendChild(text);
+    svg.appendChild(layer);
 
     return {
-      right: marginSvg + sizeSvg,
-      bottom: marginSvg + sizeSvg + labelHeightSvg * 2,
+      width:
+        margin * 2 + size + measureText(text.textContent, labelSize) + margin,
+      height: margin * 2 + size,
     };
-  }
-
-  /**
-   * Add sheet boundary to a group
-   * @param group - SVG group element
-   * @param sheetPart - Part representing the sheet
-   */
-  private addSheetBoundary(group: SVGGElement, sheetPart: Part): void {
-    sheetPart.svgelements.forEach((e) => {
-      const node = e.cloneNode(false) as SVGElement;
-      node.setAttribute("stroke", "#00ff00");
-      node.setAttribute("fill", "none");
-      group.appendChild(node);
-    });
   }
 
   /**
@@ -1232,47 +1421,9 @@ export class ExportService {
 
     // Set dimensions with unit suffix
     const unitSuffix = units === "inch" ? "in" : "mm";
-    svg.setAttribute("width", `${width / scale}${unitSuffix}`);
-    svg.setAttribute("height", `${height / scale}${unitSuffix}`);
-    svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
-  }
-
-  /**
-   * Apply line merging optimization if configured
-   * @param svg - SVG element
-   * @param nestResult - Nesting result with merged length info
-   */
-  private applyLineMerging(
-    svg: SVGSVGElement,
-    nestResult: SelectableNestingResult,
-  ): void {
-    if (!this.config || !this.svgParser) {
-      return;
-    }
-
-    const mergeLines = this.config.getSync("mergeLines");
-    const mergedLength = (nestResult as unknown as { mergedLength?: number })
-      .mergedLength;
-
-    if (mergeLines && mergedLength && mergedLength > 0) {
-      const curveTolerance = this.config.getSync("curveTolerance");
-
-      // Apply SVG processing for line optimization
-      this.svgParser.applyTransform(svg);
-      this.svgParser.flatten(svg);
-      this.svgParser.splitLines(svg);
-      this.svgParser.mergeOverlap(svg, 0.1 * curveTolerance);
-      this.svgParser.mergeLines(svg);
-
-      // Set stroke and fill for all non-group, non-image elements
-      const elements = Array.prototype.slice.call(svg.children) as Element[];
-      elements.forEach((e) => {
-        if (e.tagName !== "g" && e.tagName !== "image") {
-          e.setAttribute("fill", "none");
-          e.setAttribute("stroke", "#000000");
-        }
-      });
-    }
+    svg.setAttribute("width", `${round(width / scale)}${unitSuffix}`);
+    svg.setAttribute("height", `${round(height / scale)}${unitSuffix}`);
+    svg.setAttribute("viewBox", `0 0 ${round(width)} ${round(height)}`);
   }
 
   /**

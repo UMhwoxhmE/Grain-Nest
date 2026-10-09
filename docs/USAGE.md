@@ -1,20 +1,36 @@
-# Grain-Nest — usage guide
+# Grain-Nest — user guide
 
-This is a guide for using **Grain-Nest** to lay out pattern pieces on
-fabric. It assumes you've used **deepnest-next** (or the original
-**Deepnest**) before — if you haven't, it might be worth opening one
-of those first to get a feel for the basic nesting workflow, since
-Grain-Nest is the same engine with grain-direction rules added.
+**Grain-Nest** lays your sewing-pattern pieces out on fabric as tightly as it
+can, while keeping every piece on its grain. You give it an SVG of your
+pattern pieces and the size of your fabric; it works out a cutting layout and
+saves it as an SVG you can print, or project onto the fabric with an app such
+as Pattern Projector.
 
-If you haven't seen the parent project, the very short version is:
+This guide is for version 1.5.0 on a Mac with Apple Silicon.
 
-- You import an SVG of all the pattern pieces you want to cut.
-- You define a "sheet" — the fabric area you've got to cut from.
-- The app rearranges the pieces to fit the sheet using as little fabric
-  as possible.
+## Contents
 
-Grain-Nest's job on top of that is to make sure each piece's grain line
-ends up parallel to the fabric warp.
+- [Opening the Mac app the first time](#opening-the-mac-app-the-first-time)
+- [Quick start](#quick-start)
+- [Setting up a pattern in Inkscape](#setting-up-a-pattern-in-inkscape)
+- [Naming pieces and the Nest for menu](#naming-pieces-and-the-nest-for-menu)
+- [Grain rules](#grain-rules)
+- [Marking a grain line or a fold in the app](#marking-a-grain-line-or-a-fold-in-the-app)
+- [Which way up each piece goes (Flip top)](#which-way-up-each-piece-goes-flip-top)
+- [Napped and directional fabrics](#napped-and-directional-fabrics)
+- [Quantity, mirror copies and cutting on the fold](#quantity-mirror-copies-and-cutting-on-the-fold)
+- [Sew lines (seam allowance)](#sew-lines-seam-allowance)
+- [Sheets of fabric](#sheets-of-fabric)
+- [Working with the parts list](#working-with-the-parts-list)
+- [Running a nest](#running-a-nest)
+- [What's in the exported SVG](#whats-in-the-exported-svg)
+- [Exporting a cut list](#exporting-a-cut-list)
+- [Saving and reopening a project](#saving-and-reopening-a-project)
+- [Settings](#settings)
+- [Other handy bits](#other-handy-bits)
+- [Example files](#example-files)
+- [Common things that go wrong](#common-things-that-go-wrong)
+- [Things this version doesn't do (yet)](#things-this-version-doesnt-do-yet)
 
 ## Opening the Mac app the first time
 
@@ -45,531 +61,751 @@ macOS put on it.)
 
 ## Quick start
 
-1. **Launch the app** — double-click `Grain-Nest.app` (the very first
-   time, see [Opening the Mac app the first time](#opening-the-mac-app-the-first-time)),
-   or use the launcher described in the [README](../README.md).
-2. Click **Import** at the top-left and pick an SVG of your pattern
-   pieces. Seamly2D exports work directly.
-3. Look at the **Grain rule** column in the parts list. For each piece,
-   it should say one of:
-    - **Lock to grain** — Grain-Nest detected a grain line in the SVG
-      and knows the angle. You don't have to do anything; the piece
-      will be placed with its grain horizontal.
-    - **Free** — no grain line was detected. If the piece doesn't
-      really have a grain (e.g. a small applique), leave it as
-      **Free**. If it does, click **Mark grain** next to the dropdown
-      and follow the on-screen instructions to define the grain by
-      clicking two points.
-4. Add a sheet. Use **Add Sheet** to enter dimensions of the fabric
-   piece you're cutting from (in inches or mm — switch units in
-   Settings if you need). Or import a separate SVG with just an
-   outline and tick its **Sheet** box.
-5. Click **Start nest**. Watch the GA improve the layout for as long
-   as you like (a minute is usually plenty for a small pattern). Click
-   **Stop nest** when you're happy.
-6. Click **Export** → **SVG file** to save the cut layout (or **Cut list**
-   for a text list of pieces and fabric length).
+1. **Open the app** (the very first time, see
+   [Opening the Mac app the first time](#opening-the-mac-app-the-first-time)).
+2. Click **Import** at the top left and choose the SVG file(s) of your
+   pattern pieces. You can pick several files at once. Seamly2D exports work
+   directly; for files you draw or tidy in Inkscape, see
+   [Setting up a pattern in Inkscape](#setting-up-a-pattern-in-inkscape).
+3. Look down the **Grain rule** column in the parts list:
+    - **Lock to grain** — Grain-Nest found a grain line in your file. You
+      don't need to do anything.
+    - **Free** — no grain line was found. If the piece really has no grain
+      (a small appliqué shape, say), leave it. Otherwise click **Mark grain**
+      under the drop-down and click the bottom end, then the top end, of the
+      grain line (see [Marking a grain line](#marking-a-grain-line-or-a-fold-in-the-app)).
+4. Check each piece's picture: the orange arrow should point to the top of the
+   piece. If a piece is upside down, click **Flip top** in its **Actions**
+   column.
+5. Set up pairs and folds in the **Actions** column: **Mirror copy** for a
+   left/right pair, **Cut on fold** (or **Mark fold**) for pieces cut on the
+   fold. See [Quantity, mirror copies and cutting on the fold](#quantity-mirror-copies-and-cutting-on-the-fold).
+6. Add your fabric: click the **+** button at the bottom left of the parts
+   list, choose a preset width (it fills in the **Fabric width**), type the
+   **Length** of fabric you want to try, and click **Add**. See [Sheets of fabric](#sheets-of-fabric).
+7. If the pattern uses several fabrics, choose one in **Nest for** at the top
+   (Main fabric, Lining…). See [Naming pieces and the Nest for menu](#naming-pieces-and-the-nest-for-menu).
+8. Click **Start nest**. Watch the layout improve for as long as you like (a
+   minute or two is usually plenty), then click **Stop nest**.
+9. Click **Export → SVG file** to save the cutting layout, or **Export → Cut
+   list (text)** for a list of pieces and how much fabric to buy.
 
-## Grain rules in detail
+## Setting up a pattern in Inkscape
 
-The dropdown next to each piece is what turns Grain-Nest into a
-dressmaking tool rather than a generic CNC nester:
+Grain-Nest reads ordinary SVG files. It needs to know three things about each
+piece: its **cutting line**, its **grain line** and its **name**. Setting your
+file out like this makes all three come through automatically.
 
-| Rule | What it means | When to use |
+### The layout to aim for
+
+- One layer called **Pieces**.
+- Inside it, **one group per piece**, labelled with the piece number, name and
+  cut codes, e.g. `14 Skirt Front C1OF`.
+- Inside each group: the piece's **cutting line** and its **grain line**, with
+  the grain line's ID set to `grain-14` (the piece number after `grain-`).
+
+The [example pattern](#example-files) is laid out exactly like this, so it's a
+good one to open in Inkscape and copy.
+
+### Step by step
+
+1. **Draw or check the cutting line.** It must be one closed shape (the end
+   joined back to the start). Notches can be part of the same path as little
+   extra sub-paths (for example drawn separately and then joined with
+   **Path → Combine**); they're kept and drawn on the exported layout. Pieces
+   are always nested as solid shapes, so nothing is ever tucked inside another
+   piece's notches or holes.
+2. **Draw the grain line.** Use the pen (Bézier) tool, click once at one end,
+   hold **Ctrl** and double-click at the other end so you get a perfectly
+   straight line with just two points. It doesn't matter which end you start
+   from for detection — but see [Flip top](#which-way-up-each-piece-goes-flip-top)
+   for how the app guesses the top.
+    - Curved lines are ignored as grain lines.
+    - If you want arrowheads, add them as **markers** (Fill and Stroke →
+      Stroke style → Markers), not as drawn triangles. Markers are ignored on
+      import; a drawn arrowhead would be treated as part of the piece.
+3. **Tell Grain-Nest it's a grain line.** Select the line, open **Object →
+   Object Properties** (Ctrl+Shift+O) and use any one of these:
+    - type an **ID** containing the word `grain`, e.g. `grain-14`, then click
+      **Set** (or press Enter) — this is the recommended way;
+    - or set its **Label** to exactly `grainline`.
+
+   Grain-Nest also recognises Seamly2D's grain lines (they carry a `grainline`
+   class) and any line inside a group or layer whose label or ID is exactly
+   `grain`.
+
+   > **Pitfall:** a line labelled just **Grain** is *not* detected — Inkscape
+   > gives it an automatic ID like `path123`, and "Grain" on its own isn't one
+   > of the recognised labels. Use the ID `grain-14` or the label `grainline`.
+   >
+   > **Never** label or ID a *piece group* `grain`: everything inside a group
+   > called `grain` is treated as a grain line, cutting line included. And
+   > keep the word "grain" out of the cutting line's own ID.
+4. **For a piece cut on the fold**, draw the grain line **on the fold edge**,
+   right along the straight edge of the half-piece. When you click **Cut on
+   fold**, Grain-Nest folds the piece along its grain line, snapping to a
+   straight edge of the outline that runs within about 6° of the grain line
+   and lies close to it — so a line drawn a hair off the edge still works. If
+   your grain line isn't on the fold edge, don't worry: use the **Mark fold**
+   button in the app instead (see
+   [Marking a fold](#marking-the-fold-edge-mark-fold)).
+5. **Group the piece.** Select the cutting line and its grain line and press
+   **Ctrl+G**.
+6. **Name the group.** With the group selected, in Object Properties set the
+   **Label** to the piece name with its cut codes, e.g. `14 Skirt Front C1OF`,
+   and click **Set**. See [Naming pieces](#naming-pieces-and-the-nest-for-menu)
+   for the codes.
+7. Repeat for each piece, then **save as SVG** (Inkscape SVG or plain SVG are
+   both fine).
+
+### How Grain-Nest picks up names
+
+For each cutting line, the name comes from the first of these it finds:
+
+1. the cutting line's own Label;
+2. otherwise the Label of the nearest group around it (layers don't count);
+3. otherwise a Title on the cutting line (Object Properties → Title);
+4. otherwise an ID you typed yourself (automatic IDs like `path123` or `g45`
+   are skipped).
+
+**Layer names are never used**, so a layer called "Pieces" won't name every
+piece "Pieces". If the cutting line has its own Label that isn't the piece name
+(e.g. "Cutting line"), that wins over the group's Label — clear it, or set it
+to the same name. If nothing is found, the Name box in the parts list shows the
+file name faintly; just click and type a name.
+
+### Other things to know
+
+- **SVG files only.** Inches, millimetres or centimetres are all fine — set the
+  document units in Inkscape's Document Properties as usual. (Files with no
+  units at all use the scale under Settings → Advanced.)
+- **Text is not imported.** Labels and instructions written as text boxes are
+  dropped — Grain-Nest prints each piece's name on the export itself, from the
+  name in the parts list.
+- One file can hold the whole pattern, or you can import a file per piece.
+
+## Naming pieces and the Nest for menu
+
+The parts list has a **Name** column. Names are filled in from your file (see
+above) and you can edit them at any time. Names matter for two reasons: the
+**cut list** and the **exported layout** are labelled by name, and the **Nest
+for** menu sorts pieces into fabrics using the **cut codes** in their names.
+
+### Cut codes
+
+A cut code looks like `C2M`:
+
+- a capital **C**,
+- a number (how many to cut),
+- **one capital letter** for the fabric:
+  - **M** — main fabric
+  - **I** — interfacing
+  - **L** — lining
+  - **R** — ribbing
+- and optionally **OF** for "on the fold", e.g. `C1MOF`.
+
+Other letters are allowed but the piece then only appears under **All
+pieces**.
+
+The code must be a **separate word**: it has to have a space, `_`, comma,
+semicolon or round bracket (or the start/end of the name) on both sides. So
+`Front C2M`, `Front_C2M`, `Front (C2M)` and `Front C2M, C1L` all work, but these
+are **not** recognised:
+
+| Not recognised | Why |
+|---|---|
+| `Front c2m` | small c and small letter |
+| `Front C2m` | the fabric letter must be a capital |
+| `Front C2M-front` | a hyphen straight after the code |
+| `Front C2M.` | a full stop straight after the code |
+
+The same letter adds up: `C1M C1M` counts as two main.
+
+Pieces whose name **starts with** `INT1`, `INT 1`, `int2` and so on (any
+capitals, any number) are pattern interfacing pieces and go into
+**Interfacing**.
+
+### Which pieces each job picks
+
+| Nest for | Pieces it includes |
+|---|---|
+| **All pieces** | Everything, including pieces without codes. |
+| **Main fabric** | Pieces with an M code — unless they count as fused. |
+| **Fused (main + interfacing)** | Pieces with the **same number** of M and I, e.g. `C2M C2I`. These are cut from a block of main fabric that's been fused with interfacing first. |
+| **Interfacing** | `INT…` pieces, and pieces with an I code that don't count as fused (e.g. `C2M C1I`, or interfacing only, `C2I`). |
+| **Lining** | Pieces with an L code. |
+| **Ribbing** | Pieces with an R code. |
+
+A piece can belong to more than one job. Some examples:
+
+| Piece name | Nest for |
+|---|---|
+| `Front C2M` | Main fabric |
+| `Front C2M C2I` | Fused only |
+| `Collar C2M C1I` | Main fabric and Interfacing |
+| `Facing C2I` | Interfacing |
+| `INT1 Collar` | Interfacing |
+| `Back C1MOF C1LOF` | Main fabric and Lining |
+| `Cuff C2R` | Ribbing |
+| `Pocket` | All pieces only |
+
+### Things to know
+
+- **Codes don't set quantities or folding.** `C2M` doesn't make two copies and
+  `OF` doesn't fold the piece — they only choose which nest a piece goes into.
+  Use **Quantity**, **Mirror copy** and **Cut on fold** for that (see
+  [Quantity, mirror copies and cutting on the fold](#quantity-mirror-copies-and-cutting-on-the-fold)).
+- **The job is applied when you change the menu.** If you rename a piece
+  afterwards it isn't re-sorted — pick another job and then pick yours again.
+- After picking a job you can still tick or untick pieces by hand in the
+  **Nest** column.
+- **Sheets follow the job.** Each sheet has a **Fabric** setting. When you pick
+  a job, every sheet whose Fabric matches is ticked and the others are
+  unticked, so lining pieces nest on your lining sheet. If **no** sheet is set
+  to that fabric, the sheet ticks are left as they were (and Grain-Nest tells
+  you). **All pieces** never changes the sheet ticks.
+- **Hide excluded / Show excluded** (top bar) hides the unticked pieces so the
+  list shows exactly what will be nested — handy for checking every mirror copy
+  and fold piece is there.
+- Your ticks, the Nest for choice, and each sheet's name and fabric are saved
+  with the project.
+
+## Grain rules
+
+The **Grain rule** drop-down on each piece says how the piece may be turned on
+the fabric. In Grain-Nest the fabric runs **left to right** (the length you'd
+buy), so "on grain" means the grain line lies **horizontally** in the layout.
+
+| Rule | What it does | When to use it |
 |---|---|---|
-| **Lock to grain** | The piece will only be placed with its grain line parallel to fabric warp. | Default for most pieces — the pattern designer chose the grain direction for a reason. |
-| **Grain or flipped** | Grain parallel to warp **or** rotated 180°. | Plain weaves with no nap, or when you want the engine more freedom to pack. |
-| **Bias** | The piece is placed at 45° or 135° to the warp. | Bias-cut pieces (collars, bindings, some skirts). |
-| **Free** | Any rotation. Same as the original deepnest behaviour. | Pieces with no real grain — small applique shapes, internal facings, etc. |
-| **Custom tolerance** | Grain ±3°. | When the fabric is forgiving and you want the engine slight wiggle room to pack better. |
+| **Lock to grain** | Grain line along the length of the fabric, with the top of the piece towards the start (left). | Most pieces — the default when a grain line is found. |
+| **Grain or flipped** | On grain, either way up (turned end to end if that saves fabric). | Plain fabrics with no nap or one-way print. |
+| **Bias** | Turned 45° or 135° from its drawn grain line. | Bias-cut pieces whose pattern draws the grain line *straight*, as for an on-grain piece. |
+| **Free** | Any of a few turns (set under Settings → Advanced → Rotations). | Pieces with no real grain. |
+| **Custom tolerance** | On grain, or up to 3° either way. | Forgiving fabrics, when a tiny wiggle helps the pieces fit. |
 
-Detected grain lines and manually-marked ones behave identically once
-they're set. The only difference is provenance.
+**About Bias:** Bias turns the piece 45° (or 135°) *from whatever grain line it
+has*. Many patterns already draw the grain arrow diagonally on a bias piece —
+in that case the drawn arrow *is* the warp direction, so choose **Lock to
+grain**, not Bias, or the piece ends up turned twice.
 
-## Marking a grain line manually
+**About Custom tolerance:** the piece may sit exactly on grain, 3° one way or
+3° the other.
 
-If a piece imported as **Free** but you want it locked to a grain
-direction:
+A grain line found in your file and one you mark in the app behave the same
+once they're set.
 
-1. Click the **Mark grain** link next to the piece's dropdown.
-2. A blue banner appears at the top of the window. The next two clicks
-   on the canvas define the grain line.
-3. Click two points along the grain direction: **the bottom end first,
-   then the top end** (towards the top of the piece). That tells
-   Grain-Nest which way up the piece goes as well as its angle — exact
-   position doesn't matter.
-   - **Hold Shift while clicking the second point** to snap the angle
-     to the nearest of 0° / 45° / 90° / 135°. This is the easy way to
-     get an exactly horizontal, vertical, or 45° grain without
-     chasing the cursor.
-4. The dropdown switches to **Lock to grain** and a dashed cyan line
-   appears on the piece showing what was recorded.
-5. If you mis-clicked, the link relabels to **Re-mark** — click it
-   and click two new points to overwrite.
-6. Press **Esc** at any point to cancel without changing anything.
+To set one rule on many pieces, select them and use the **Grain rule…**
+drop-down in the **Apply to selected** bar.
+
+## Marking a grain line or a fold in the app
+
+### Mark grain and Re-mark
+
+Under each piece's grain-rule drop-down is a small link:
+
+- **Mark grain** — for a piece where no grain line was found.
+- **Re-mark** — for a piece that already has one (found in the file, or marked
+  before), to replace it.
+
+To mark:
+
+1. Click **Mark grain** (or **Re-mark**). A banner appears at the top of the
+   window.
+2. Click **the bottom end** of the grain direction, **then the top end** —
+   towards the top of the piece. The two clicks set both the angle and which way
+   up the piece goes; exactly where you click doesn't matter.
+    - **Hold Shift on the second click** to snap to the nearest 45° step
+      (horizontal, vertical or diagonal).
+3. The drop-down switches to **Lock to grain** and a dashed blue line appears on
+   the piece, drawn through its middle.
+4. Press **Esc** (or click **Cancel** on the banner) at any time to stop without
+   changing anything.
+
+Re-marking replaces the grain line from your file with the marked one, both for
+nesting and in the export. On a piece you're going to cut on the fold, use
+**Mark fold** to set the fold edge, as the marked line runs through the middle
+of the piece rather than along its fold.
+
+### Marking the fold edge (Mark fold)
+
+If a piece is cut on the fold but its grain line isn't drawn on the fold edge,
+tell Grain-Nest which edge is the fold:
+
+1. Click **Mark fold** in the piece's **Actions** column. The preview on the
+   right switches to the file the piece came from.
+2. Click on the piece's **straight fold edge** in that preview (zoom in first if
+   it's small).
+3. The edge nearest your click becomes the fold, and the piece is cut on the
+   fold straight away — its picture doubles.
+
+The marked fold is saved with the project. **Unfold** (the same button that said
+Cut on fold) undoes it; Esc cancels before you click.
 
 ## Which way up each piece goes (Flip top)
 
-Pattern PDFs turn pieces every which way to fit the paper — some upside
-down, some sideways, some at odd angles. A grain line alone doesn't say
-which end of the piece is the top, so Grain-Nest has to guess.
+Pattern files turn pieces every which way to fit the paper. A grain line on its
+own doesn't say which end is the top, so Grain-Nest makes a guess:
 
-The picture of each piece in the parts list shows it **standing
-upright**, with its grain line running up and down and an **orange
-arrow pointing at the top**. Go down the list once and look for any
-piece that's upside down (neckline or sleeve cap at the bottom, and so
-on), and click **Flip top** next to it. The picture turns over; that's
-all there is to it. Odd angles (30°, 45°…) are handled for you — Flip top
-only ever swaps top and bottom.
+- **For a grain line found in your file**, the end **higher up on the page** is
+  the top. (If the line is exactly horizontal, the **left** end is the top.) So
+  pieces drawn upright, as most patterns draw them, come in the right way up.
+- **For a grain line you marked**, your **second click** is the top.
+
+The picture of each piece in the parts list shows it **standing upright**, with
+an **orange arrow pointing at the top**. Go down the list once and look for any
+piece that's upside down (neckline or sleeve head at the bottom, and so on),
+and click **Flip top** in its **Actions** column. The picture turns over;
+that's all. Odd angles are handled for you — Flip top only ever swaps top and
+bottom.
 
 In the nest, **Lock to grain** lays every piece with its top towards the
-**left** — the start of your fabric — so all pieces point the same way,
-as if you'd turned them by hand before importing. (**Grain or flipped**
-still lets a piece go either way when that saves fabric.)
-
-- To flip several pieces at once, select them and click **Flip top** in
-  the **Apply to selected** bar.
-- A **mirror copy** keeps the same top as its original.
-- Your flips are saved with the project (**Save project**), so you only
-  do this once per pattern.
-- Pieces without a grain line have no Flip top link — mark their grain
-  first (bottom end, then top end, see above).
-
-## Working with napped or directional fabrics
-
-Some fabrics look different depending on which way you cut the
-pieces:
-
-- **Napped fabrics** (velvet, corduroy, brushed flannel, suede)
-  catch light differently along the nap direction. Cut a piece
-  upside-down and it'll show as a different shade in the finished
-  garment.
-- **Directional prints** (a floral whose flowers all point up, a
-  print of rain falling) need every piece oriented the same way
-  down the bolt, otherwise some flowers face up and others face
-  down in the finished garment.
-
-For these fabrics, tick the **Nap (directional)** checkbox at the
-top of the parts panel before starting the nest. While the box is
-ticked:
-
-- Every piece is locked to grain at 0° **only** — the 180° flip
-  that **Grain or flipped** and **Free** would normally allow is
-  suppressed, so no piece can end up rotated end-for-end against
-  the nap.
-- Bias-cut pieces all use the same bias direction (+45°), not both
-  diagonals.
-
-When you save a project, the nap state is saved with it. Open the
-project later and the box ticks itself back on automatically. For
-ordinary plain weaves without nap, leave the box unchecked —
-otherwise you'll lose some of the engine's flexibility to pack
-pieces efficiently.
-
-> Bias pieces under nap all use **+45°** by design — −45° isn't
-> needed in practice, so there is no per-piece toggle. If you ever do need the opposite diagonal on
-> one piece, **Mirror copy** it: the mirror flips bias direction.
-
-## Adding a sheet with a preset fabric width
-
-Click the **+** button at the bottom left of the parts list. The **Add a
-sheet** box pops up in the middle of the window. Give the sheet a **Name**
-and pick its **Fabric** (both optional, and editable later in the parts
-list — see *Choosing which pieces go into a nest*). The **Preset width**
-dropdown lists the most common usable bolt widths:
-
-- 90 cm — interfacing and fused (picking **Interfacing** or **Fused** as
-  the sheet's Fabric fills this in for you)
-- 109 cm
-- 137 cm
-- 147 cm
-- 157 cm
-- 177 cm
-
-(These are *usable* widths — i.e. the selvedge edge is already
-excluded.)
-
-Pick one and Grain-Nest fills in the **height** field automatically —
-that's the bolt width (the fixed measurement off the roll). You fill
-in the **width** with how much fabric length you want to try, then
-click **Add**.
-
-If your fabric isn't on the list, just type both numbers in by hand
-and leave the dropdown at "(no preset)".
-
-## How Grain-Nest reads the sheet
-
-Grain-Nest treats your sheet as a length of fabric off the roll laid
-out left-to-right: the **width** (horizontal) is the fabric length
-you'd buy, and the **height** (vertical) is the bolt width (the fixed
-measurement off the roll). Pieces set to **Lock to grain** are placed
-grain-horizontal, parallel to that length — so the Cut list's "length
-used" is the figure you take to the fabric shop.
-
-(Earlier builds had a **Warp** dropdown to swap these two axes. It was
-removed in favour of always laying fabric out this way — in practice
-that's how you buy it, and the option caused more confusion than it
-solved.)
-
-## Checking the scale of a printed nest
-
-Every SVG export now includes a small calibration square in the
-top-left corner — a 4-inch box by default. After you print the nest
-(or project it onto fabric), measure that box with a ruler:
-
-- If it measures 4 inches: the print/projection is at the right
-  scale and the rest of the pieces are too.
-- If it's bigger or smaller: your printer's "fit to page" setting
-  is on, or your projector hasn't been calibrated. Fix the scale
-  setting and re-print/re-project rather than cut from the
-  miscalibrated copy.
-
-The box is on by default. To turn it off, or change its size, use
-**Settings → Export → Calibration square**.
-
-## Finding the minimum fabric length you need
-
-Once a nest has run and you've picked a result, the nest-info bar
-at the top of the nest view shows a **min fabric length** stat
-alongside utilisation and sheets used. That number is the actual
-fabric length the placed pieces consumed — i.e. the minimum length
-you'd need to buy.
-
-If you started with a generous sheet (say 5 m of fabric for a
-project that only needed 2.65 m), the rest is wasted in the nest
-result. To shrink the sheets down to the minimum, click **Trim
-sheets** in the top-nav. The sheet rectangles in the parts table
-visibly shrink, and the nest results clear. Click **Start nest**
-to re-run at the trimmed sizes — utilisation should jump.
-
-The trim button also tells you how many sheets it touched. If you
-nested with multiple sheets, each gets trimmed independently to
-its own min length.
-
-## Exporting a cut list
-
-Beyond the SVG of the nest itself, you can save a plain-text summary
-of the cut: piece names with how many of each — mirrored copies are
-listed on their own `(mirrored)` line — plus per-sheet stats and the
-total fabric length you need to buy.
-
-Piece names come from the **Name** column (see *Naming your pieces*
-above); any piece you haven't named falls back to its filename, so an
-SVG holding several un-named pieces will list them together under one
-filename until you name them apart.
-
-Click **Export → Cut list (text)** from the nest screen. Pick a
-filename, save. Open the .txt in any editor — readable as-is, or
-print it out so you've got the totals in your hand at the fabric
-shop.
-
-The "length used" per sheet is calculated from the actual placed
-pieces, not the full sheet you defined — so if you specified 3m of
-fabric but the nest only needed 2.65m, the cut list reports 2.65m
-as the buy-this length.
-
-## Saving and reopening a project
-
-After you've imported pattern pieces, marked grains, set rules, and
-maybe added sheets, you don't need to redo any of that next time.
-Two buttons at the top of the parts panel handle saving and loading:
-
-- **Save project** — opens a save dialog. Pick a folder and filename
-  (defaults to `grain-nest-project.gnp`). The file extension is
-  `.gnp` (Grain-Nest Project) — keep it as-is so Grain-Nest
-  recognises the file later.
-- **Open project** — opens a file picker. Choose any `.gnp` file. The
-  current workspace is cleared and the saved one loaded in its
-  place. Parts come back with their grain rules, manual grain
-  markings, mirror states, and sheets all intact. Any nest results
-  from before saving also come back, although re-running the nest is
-  usually faster than restoring stale results if you've changed
-  anything.
-
-The `.gnp` file is **self-contained** — it embeds the full content of
-every imported SVG. You can move the file between machines or share
-it without also having to ship the original Seamly2D source files. If
-you later edit the original SVG and want those changes in the
-project, just re-import that one piece (the project file's copy
-won't auto-update).
-
-A few small things that **aren't yet** in the saved file: which tab
-was active, the zoom level on each import, dark-mode toggle, which
-nest was selected. The next time we touch this feature we can fold
-any of these in if it would actually save you clicks.
-
-## Mirroring a piece
-
-Two small **Mirror** links sit next to each piece's **Grain rule**
-dropdown.
-
-- **Mirror** — flips the piece left-to-right in place (the standard
-  "cut 1 reversed" interpretation). The thumbnail flips immediately
-  and the dropdown link relabels to **Unmirror**, so you can undo
-  with the same button. If the piece had a grain direction, the grain
-  is mirrored along with the geometry, so **Lock to grain** still
-  works correctly after a flip.
-- **Mirror copy** — leaves the original alone and adds a new row to
-  the parts table whose contents are the mirror image of the
-  original. Quantity defaults to 1; edit it like any other piece.
-  This is the typical "cut 1, cut 1 reversed" workflow.
-
-The basic Mirror buttons don't double a piece for **cutting on the
-fold** — that has its own control and its own section just below.
-
-## Cut on the fold
-
-**Cutting on the fold** is the technique where the pattern stores only
-*half* of a symmetric piece. You lay that half with its straight fold
-edge against a fold in the doubled-over fabric, cut around it, and
-unfold to get the whole piece — a front bodice, say, that's the same on
-the left and the right. The pattern holds half; the fabric you actually
-cut is the full doubled shape.
-
-That matters for nesting: Grain-Nest has to lay out the **whole doubled
-piece**, not the half, or it would under-estimate the fabric you need.
-
-To mark a piece as cut-on-fold:
-
-1. In the parts list, click the **Cut on fold** link in the piece's row.
-   It sits in the **Grain rule** cell next to the **Mirror** links.
-2. The thumbnail doubles straight away: the half is reflected across its
-   fold edge and joined to its mirror image to make the full piece. The
-   link relabels to **Unfold**, so you undo it with the same click.
-3. Nest as usual. Grain-Nest places the full doubled piece — so the
-   fabric length it reports already accounts for the whole thing.
-
-**Where the fold edge comes from.** By default Grain-Nest folds the
-piece across its **grain line** — on a cut-on-fold piece the fold edge
-and the grain line are normally the same straight edge, so folding
-across the grain gives the right result. For that to work, the grain
-has to be a straight line drawn *on* the fold edge (see the limits
-below).
-
-A few things to know (this is a first version):
-
-- **The exported cut still shows the fold edge as a line.** In the SVG
-  export the doubled piece is drawn as its two halves meeting at the
-  fold, so the fold edge appears as a seam line down the centre. On a
-  real cut-on-fold you **don't** cut the fold — so read that centre line
-  as the fold itself, not a cutting line. Redrawing the doubled piece as
-  one clean outline with no fold line is a planned improvement.
-- **The grain line must be a straight line on the fold edge.** If the
-  grain is a curve, or was marked by hand (a manual mark is drawn
-  through the centre of the piece, not along an edge), Grain-Nest folds
-  across the wrong line and the piece doubles the wrong way. Making the
-  fold snap to a real edge however the grain is drawn is part of the
-  same follow-up.
-- **It's saved with the project.** The cut-on-fold state and the fold
-  line are stored in the `.gnp` file, so a folded piece comes back
-  folded when you reopen the project.
-
-## Naming your pieces
-
-The parts table has a **Name** column. When you import an SVG that was
-labelled in Inkscape (Object Properties → Label, or a layer/group name),
-Grain-Nest tries to fill the name in for you. Where it can't, the cell is
-blank with the filename shown faintly behind it — just click and type a
-name (front, back, sleeve, …).
-
-Why it's worth doing: the **cut list** groups pieces by name, so naming
-them turns the export into an itemised checklist — handy for confirming
-you've got every piece before cutting. Names are saved with the project,
-and a mirrored copy keeps its name (shown as "name (mirrored)" in the cut
-list).
-
-## Deleting pieces
-
-Select the rows and click the bin button at the bottom left of the parts
-list (or press Delete). Grain-Nest asks first, listing what will go.
-Pressing Backspace or Delete while typing in a box (a name, quantity or
-seam) never deletes rows.
-
-## Arranging the parts list
-
-- **Column widths:** drag the thin grip at the right edge of any column
-  heading (the last one too). Boxes in the column (quantity, seam) shrink
-  and grow with it.
-- **Actions column:** each piece's **Flip top**, **Mirror**, **Mirror
-  copy** and **Cut on fold** buttons sit in the last column. Clicking them
-  (or any box or drop-down in a row) doesn't select the row — click
-  elsewhere on the row to select it.
-- **Panel width:** drag the right edge of the parts list to make it wider
-  or narrower than the picture panel beside it.
-- Grain-Nest **remembers** both the next time you open it. To go back to
-  the original layout, click **Reset layout** at the bottom right of the
-  parts list.
-
-## Applying a change to several pieces at once
-
-Below the parts table is a toolbar with an **Apply to selected** section. Select the rows you
-want (click them, or use **Select all**), then:
-
-- Pick a **grain rule** from the dropdown to set it on every selected
-  piece at once — e.g. set a whole pattern to **Lock to grain** in one go.
-- Click **Flip top** to turn the selected pieces end-to-end (see *Which
-  way up each piece goes*).
-- Click **Mirror** / **Unmirror** to flip the selected pieces together.
-- Type a number and click **Set qty** to set the quantity on all of them.
-
-After each of these, the pieces you changed are **unselected**, so the next
-action can't catch them by mistake.
-
-If nothing is selected, the bar will tell you to select some pieces first.
-
-## Choosing which pieces go into a nest
-
-Import every piece once, then choose what goes into each nest — main
-fabric, lining, ribbing, interfacing — without deleting anything.
-
-- **Nest column**: untick a piece to leave it out of the next nest. It
-  stays in the list, greyed out; tick it again to bring it back.
-- **Nest for** (top bar): picks the pieces for one fabric from the cut
-  codes in their names (`C2M` = cut 2 main, `C1L` = cut 1 lining, `C2I` =
-  interfacing, `C1R` = ribbing, `…OF` = on the fold):
-  - **Main fabric** — pieces with a main (M) code, except fused ones.
-  - **Fused (main + interfacing)** — pieces with the same number of main
-    and interfacing (e.g. `C2M C2I`), for cutting from a bulk-fused block.
-  - **Interfacing** — pieces with fewer interfacing than main (e.g.
-    `C2M C1I`), interfacing-only pieces, and `INT` pieces.
-  - **Lining** / **Ribbing** — pieces with an L / R code.
-  - **All pieces** — everything, including pieces without codes.
-  After picking, you can still tick or untick pieces by hand.
-- **Hide excluded / Show excluded**: hides the unticked pieces so the list
-  shows exactly what will be nested — handy for checking every mirror copy
-  and fold piece is there.
-- **Include / Exclude** (Apply to selected): tick or untick several pieces
-  at once.
-
-**Sheets for each fabric.** Each sheet (piece of fabric) has a **name**, a
-**Fabric** drop-down (in the *Grain rule / Fabric* column: Main fabric,
-Fused, Interfacing, Lining, Ribbing) and its own **Nest** tick box. When
-you pick a job in **Nest for**, every sheet whose Fabric is that job is
-ticked and the others are unticked — so the lining pieces nest on your
-lining sheets only. One fabric can have several sheets (e.g. two lining
-remnants); they're all ticked. If no sheet is set to that fabric, the
-sheet ticks are left as they were and Grain-Nest tells you. **All pieces**
-never changes the sheet ticks. Start nest won't run with every sheet
-unticked.
-
-Your ticks, the "Nest for" choice, and each sheet's name and fabric are
-saved with the project. A mirror copy starts with the same tick as the
-piece it was copied from.
+**start (left)** of the fabric, so they all point the same way. (**Grain or
+flipped** still lets a piece go either way when that saves fabric.)
+
+- **Flip top** only appears on pieces that have a grain line — mark the grain
+  first if it's missing.
+- To flip several pieces at once, select them and click **Flip top** in the
+  **Apply to selected** bar.
+- Mirroring a piece keeps its top, and a mirror copy has the same top as its
+  original.
+- Flips are saved with the project, so you only do this once per pattern.
+
+## Napped and directional fabrics
+
+Some fabrics look different depending on which way you cut the pieces:
+
+- **Napped fabrics** (velvet, corduroy, brushed flannel, suede) catch the light
+  differently along the nap. Cut a piece upside down and it shows as a
+  different shade in the finished garment.
+- **One-way prints** (flowers all pointing up, falling rain) need every piece
+  the same way up, or some motifs end up upside down.
+
+For these, tick **Nap (directional)** in the top bar before starting the nest.
+While it's ticked:
+
+- **Lock to grain** and **Grain or flipped** pieces are all kept one way up
+  (never turned end to end).
+- **Bias** pieces all use the same diagonal (+45°), not both.
+- **Free** pieces aren't turned at all — they stay as drawn.
+- **Custom tolerance** pieces keep their 3° either way.
+
+The nap setting is saved with the project. For ordinary fabrics leave it
+unticked, or you'll lose some of the freedom that helps pieces fit.
+
+> If you ever need the opposite diagonal on one bias piece, **Mirror copy** it:
+> mirroring flips the bias direction.
+
+## Quantity, mirror copies and cutting on the fold
+
+Which one to use:
+
+| You need… | Use |
+|---|---|
+| Identical copies of a piece (same way up, not mirrored) | **Quantity** |
+| A left and right pair ("cut 2" of a one-sided piece, e.g. a sleeve or back) | **Mirror copy** |
+| Two of a symmetrical piece (e.g. a patch pocket) | **Quantity** 2 |
+| A piece the pattern stores as a half, to cut on the fold | **Cut on fold** (or **Mark fold**) |
+
+### Quantity
+
+Type a number in the **Quantity** box. Each extra copy is identical — not
+mirrored. To set many at once, select the rows, type a number by **Set qty** in
+the **Apply to selected** bar and click **Set qty**.
+
+### Mirror and Mirror copy
+
+Both buttons are in the piece's **Actions** column.
+
+- **Mirror** flips the piece left to right in place (for a pattern that says
+  "cut 1 reversed"). It changes to **Unmirror**, so the same button undoes it.
+  The grain line flips with the piece, so it still lies on grain.
+- **Mirror copy** leaves the original alone and adds a new row underneath:
+  its mirror image. This is the usual way to get a left/right pair. The copy
+  takes the original's name, grain rule, top, seam allowance, Nest tick and
+  cut-on-fold setting. Its quantity starts at 1.
+
+To mirror several pieces at once, select them and use **Mirror** / **Unmirror**
+in the **Apply to selected** bar.
+
+### Cut on fold
+
+Cutting on the fold is when the pattern holds only *half* of a symmetrical
+piece: you lay its straight edge on the fold of doubled fabric, cut, and unfold
+to get the whole piece. Grain-Nest has to lay out the **whole** piece, or it
+would under-estimate the fabric.
+
+1. Click **Cut on fold** in the piece's **Actions** column.
+2. The picture doubles: the half is reflected across its fold edge to make the
+   full piece. The button changes to **Unfold**, so the same click undoes it.
+3. Nest as usual. The layout and the fabric length allow for the full piece.
+
+The fold edge is taken from the piece's grain line, which should be drawn on the
+fold edge (see [Setting up a pattern in Inkscape](#setting-up-a-pattern-in-inkscape)).
+If it isn't — or if Grain-Nest tells you it can't fold the piece — use **Mark
+fold** instead.
+
+In the export, a cut-on-fold piece is drawn as **one seamless outline** with no
+line down the fold, and its notches appear on both halves. The fold setting is
+saved with the project, and a mirror copy of a folded piece is folded too.
 
 ## Sew lines (seam allowance)
 
 A **sew line** is the line you stitch along, set in from the cut edge by the
-**seam allowance** (the margin of fabric taken up inside the seam). Grain-Nest
-can draw this line inside each piece on the exported layout, so the print or
-projection shows where to stitch as well as where to cut.
+seam allowance. Grain-Nest draws it inside each piece on the exported layout,
+so the print or projection shows where to stitch as well as where to cut.
 
-1. In the parts list, type a value into the **Seam (mm)** box on a piece's
-   row — e.g. `15` for a 1.5 cm allowance. Leave it blank (or `0`) for no sew
-   line on that piece.
-2. To set the same allowance on many pieces at once, select the rows and use
-   the **Seam mm** box and **Set seam** button in the **Apply to selected**
-   bar.
-3. Nest as usual and **Export → SVG**. Each piece with an allowance gets a
-   dashed magenta sew line drawn inside its cut outline, that far in.
+1. Type a value in a piece's **Seam (mm)** box — e.g. `15` for 1.5 cm. Leave it
+   blank or `0` for no sew line.
+2. To set many at once, select the rows, type a value by **Set seam** in the
+   **Apply to selected** bar and click **Set seam**.
+3. Export as usual: each piece gets a **dashed** sew line that far inside its
+   cutting line.
 
-New pieces get a default allowance: **12 mm for a woven project, 10 mm for
-a knit** — pick **Woven** or **Knit** in the top bar (it's saved with the
-project). Switching updates every piece still on the old default and leaves
-any you've set by hand. Change the two defaults in **Settings → Seam
-allowance**.
+New pieces get a default allowance: **12 mm for a woven project, 10 mm for a
+knit** — choose **Woven** or **Knit** in the top bar (saved with the project).
+Switching updates every piece still on the old default and leaves any you've
+set by hand. Change the two defaults in **Settings → Seam allowance**.
 
 Notes:
 
-- The allowance is entered in **millimetres** and is saved with the project,
-  so it comes back when you reopen.
-- It's **per piece**, so you can give a hem a wider allowance than the side
-  seams.
-- Notches and grain/fold marks are ignored — the sew line follows the piece's
-  cut outline only.
-- It currently insets *inward*, assuming the outline you drew is the
-  **cutting** line. If you draw your patterns at the **stitching** line
-  instead, an outward option may be added later.
-- The sew line appears in the **exported** SVG, not (yet) in the on-screen
-  parts thumbnail or nest preview.
+- The allowance is per piece, so a hem can have more than the side seams.
+- The sew line follows the piece's outline; notches are ignored.
+- It's set *inwards*, assuming your outline is the **cutting** line (with seam
+  allowance included).
+- It only appears in the exported SVG, not in the pictures on screen.
 
-## Common things that go wrong
+## Sheets of fabric
 
-- **The dashed grain line looks slightly off after marking.** That's
-  fine — what's stored is the *angle*, drawn through the centre of the
-  piece for visualization. The engine cares about the angle, not the
-  drawn position. If the angle looks wrong, click Re-mark.
-- **A piece comes in as Free and shouldn't.** Either the grain line in
-  the SVG didn't match any of the patterns Grain-Nest looks for
-  (Seamly2D's grainline class, an Inkscape grain layer, an `id`
-  containing "grain"), or there isn't one at all. Use Mark grain.
-- **Nest output looks worse than free-rotation.** That's expected.
-  Constraining grain reduces the engine's options, so utilization
-  typically drops 5–10% vs. unconstrained. That's the cost of cutting
-  fabric correctly.
-- **Some pieces are placed but rotated wrong.** Check the dropdown —
-  if it says **Bias** or **Grain or flipped** that explains it.
+A **sheet** is a piece of fabric to nest on.
 
-## Known issue — detected grain doesn't always auto-lock
+### Adding a sheet
 
-When you import an SVG with a grain line that Grain-Nest recognises,
-two things should happen:
+Click the **+** button at the bottom left of the parts list. The **Add a sheet**
+box opens:
 
-1. A dashed cyan line gets drawn on the piece — the **visual cue**.
-   This is working.
-2. The **Grain rule** column for that piece shows **Lock to grain**
-   — this is the bit that's still flaky.
+- **Name** and **Fabric** — both optional and editable later in the parts list.
+  The Fabric (Main fabric, Fused, Interfacing, Lining, Ribbing) is what the
+  [Nest for](#naming-pieces-and-the-nest-for-menu) menu uses to tick the right
+  sheets.
+- **Preset width** — common usable fabric widths (selvedges already excluded):
+  35 in (90 cm, for interfacing and fused — choosing Interfacing or Fused as
+  the Fabric fills this in for you), 43 in (109 cm), 54 in (137 cm), 58 in
+  (147 cm), 62 in (157 cm) and 70 in (177 cm).
+- **Fabric width** — the width of the fabric, selvedge to selvedge. Picking a
+  preset fills this in for you (e.g. 1370 mm for 54 in).
+- **Length** — how much fabric you want to try, measured along the selvedge.
+  Type it in and click **Add**.
 
-**Watch out for**: a dashed cyan line on a piece *but* the dropdown
-still saying **Free**. That means the visual is misleading — the
-piece will *not* be constrained when you start the nest, so it'll
-rotate freely and you'll end up cutting against the grain. For a
-fabric with nap (velvet, corduroy) or a directional weave, that
-would ruin the cut.
+(Earlier versions labelled these two boxes "width" and "height".)
 
-**Workaround** (5 seconds per piece): click **Mark grain** next to
-the affected row, then click any two points roughly along the
-visible dashed line. The dropdown flips to **Lock to grain** and the
-piece nests correctly. Manual marking is independent of detection
-and is reliable.
+If your fabric isn't on the list, leave the preset at "(no preset)" and type both
+numbers yourself. The numbers are in the display units chosen in Settings
+(inches or mm).
 
-**What's been fixed and what hasn't.** As of Phase 5f, the fix
-covers the most common case (grain lines exported by Inkscape as
-`<path>` elements, and the same for `<polyline>` / `<polygon>`).
-The simpler `<line>` case may
-still be affected — if you hit it, set `deepnest_debug=1` before
-launching to capture diagnostic information that helps us pinpoint
-the cause. (In Terminal: `deepnest_debug=1 npm start`.)
+You can also import an SVG of a fabric outline (a remnant, say) and tick its
+**Sheet** box in the parts list.
+
+### How Grain-Nest reads a sheet
+
+The sheet is a length of fabric laid out on screen as if unrolled from the
+bolt: the **Length** runs **left to right**, across the screen, and the
+**Fabric width** runs **top to bottom**, selvedge to selvedge. Pieces on
+**Lock to grain** lie with their grain along the length, parallel to the
+selvedges.
+
+It's fine to start with a generous length: the nest tells you the **min fabric
+length** actually used, and **Trim sheets** shrinks the sheet to fit (see
+[Running a nest](#running-a-nest)).
+
+### Several sheets and several fabrics
+
+Each sheet has its own **Nest** tick box and a **Fabric** drop-down (in the
+Grain rule / Fabric column). One fabric can have several sheets — two lining
+remnants, say — and all of them are used. **Start nest** won't run with every
+sheet unticked.
+
+## Working with the parts list
+
+### The Actions column
+
+Each piece's buttons are in the last column: **Flip top** (only when the piece
+has a grain line), **Mirror**, **Mirror copy**, **Cut on fold** / **Unfold** and
+**Mark fold** (hidden while the piece is cut on the fold). Clicking a button,
+box or drop-down in a row doesn't select the row.
+
+### Selecting rows
+
+- Click a row (anywhere that isn't a button or box) to select it; click it again
+  to unselect.
+- **Drag** down over rows with the mouse button held to select several in one
+  go.
+- **Select all** at the bottom left selects every visible row (and changes to
+  **Deselect all**).
+
+### Sorting
+
+Click a column heading — **Size**, **Sheet**, **Quantity** or **Grain rule /
+Fabric** — to sort the list by it. Click again to reverse the order.
+
+### Applying a change to several pieces at once
+
+Select the rows, then use the **Apply to selected** bar below the list:
+
+- **Grain rule…** — set one rule on all of them.
+- **Flip top**, **Mirror**, **Unmirror**.
+- **Include** / **Exclude** — tick or untick them for the next nest.
+- **Set qty** and **Set seam** — type a value in the box first.
+
+After each of these the changed pieces are **unselected**, so the next action
+can't catch them by mistake. If nothing is selected, Grain-Nest asks you to
+select some pieces first.
+
+### Deleting pieces
+
+Select the rows and click the **bin** button at the bottom left of the parts list
+(or press **Delete** or **Backspace**). Grain-Nest asks first, listing what will
+go. Pressing Delete or Backspace while typing in a box (name, quantity or seam)
+never deletes rows.
+
+### Clear all
+
+**Clear all** in the top bar removes every piece, sheet, import and nest result
+and starts afresh. It asks first. There is **no undo** — in Clear all or
+anywhere else in Grain-Nest — so save a project first if you might want it back.
+
+### The import preview
+
+The panel on the right shows the files you've imported, with **one tab per
+file** along the top. Click a tab to see that file. Use the zoom buttons in the
+corner to zoom in, zoom out and reset the view. Closing a tab (its small ×) only
+removes the preview — the pieces stay in the parts list.
+
+### Arranging the panels
+
+- **Column widths:** drag the thin grip at the right edge of any column heading.
+- **Panel width:** drag the right edge of the parts list to make it wider or
+  narrower than the preview beside it.
+- Grain-Nest **remembers** both next time. To go back to the original layout,
+  click **Reset layout** at the bottom right of the parts list.
+
+## Running a nest
+
+Click **Start nest** (it's greyed out until you have a sheet). Grain-Nest
+switches to the nest screen and keeps trying new layouts, showing the best so
+far.
+
+- **Stop nest** stops the search. The button then reads **Start nest**, so you
+  can set it going again.
+- The bar at the top shows **sheets used**, **parts placed**, **sheet
+  utilisation** and **min fabric length** — the length of fabric the placed
+  pieces actually use, i.e. the least you need to buy.
+- **Best nests so far** lists the layouts found, sorted **least fabric
+  first**, each with its fabric length. Click one to show it; that's the one
+  Export and Trim sheets use.
+- **Trim sheets** shrinks each sheet to the length the **selected** layout
+  used. The nest results are cleared; click **Start nest** again at the trimmed
+  size and the utilisation should jump.
+- **Export** saves the selected layout as an **SVG file** or a **Cut list
+  (text)**.
+- **Back** returns to the parts list. This stops the nest and **clears the
+  results**, so export what you want to keep first.
+
+A nest with grain rules usually uses a little more fabric than one where pieces
+can turn freely — that's the cost of cutting on grain.
+
+## What's in the exported SVG
+
+The exported file is laid out like your pattern file, so it's easy to open in
+Inkscape or Pattern Projector.
+
+### Layers
+
+- **Calibration** — the calibration square and its label (e.g. "4 in (101.6 mm)
+  square: measure to check the scale"), in a strip along the top of the page
+  above the first sheet, never over a piece.
+- One layer per sheet, named **Sheet 1 - *sheet name*** (just "Sheet 1" if the
+  sheet has no name), then Sheet 2 and so on, one below the other.
+
+Pattern Projector only shows what's on the SVG's page, and can switch layers on
+and off — so you can turn the **Calibration** layer off once you've checked the
+scale (or hide it in Inkscape).
+
+### Inside each sheet layer
+
+- A **Sheet border** group with the outline of the fabric (when **Draw the
+  sheet border** is on in Settings).
+- One group per piece, labelled with the piece's name (mirrored pieces add
+  **(mirrored)**). Inside, using the piece number from the start of the name
+  (`14` for "14 Skirt Front C1OF"):
+  - `cut-14` — the cutting line, including notches;
+  - `sew-14` — the dashed sew line, set in by the seam allowance (when the piece
+    has one);
+  - `grain-14` — the grain line, solid;
+  - `name-14` — the piece name.
+
+The **name** is placed where the piece has most room, clear of the notches, the
+sew line and (where possible) the grain line. On thin pieces it's made smaller
+or turned to run along the piece; if the full name won't fit, just the piece
+number is printed.
+
+### Lines and colours
+
+Every line is the same width — **2 mm** by default — and the colours come from
+**Settings → Export**:
+
+| Line | Default colour |
+|---|---|
+| Cutting line (and piece names, calibration square) | aubergine `#3b1f6e` |
+| Sew line (dashed) | moss green `#4f8a26` |
+| Grain line (solid) | moss green `#4f8a26` |
+| Sheet border | white `#ffffff` |
+
+A white border shows up well when projected onto fabric, but it's invisible on
+Inkscape's white page — select it in the Layers and Objects panel if you need
+to find it. If your projection looks better the other way round, Pattern
+Projector's **Invert colours** swaps the colours.
+
+### Checking the scale
+
+After you print or project the layout, measure the calibration square:
+
+- If it's the right size (4 inches by default), everything else is too.
+- If it's bigger or smaller, your printer's "fit to page" is on or your
+  projector isn't calibrated. Fix that and re-print or re-project rather than
+  cut from a mis-scaled copy.
+
+Turn the square off, or change its size, in **Settings → Export → Calibration
+square**.
+
+## Exporting a cut list
+
+**Export → Cut list (text)** on the nest screen saves a plain-text summary of
+the selected layout:
+
+- each piece name with how many of it are placed — mirrored copies are listed on
+  their own `(mirrored)` line;
+- for each sheet: its size, pieces placed, **length used** and utilisation;
+- the **total fabric length** to buy.
+
+The length used is measured from the placed pieces, not the sheet you set up — so
+if you allowed 3 m but the layout only needs 2.65 m, the cut list says 2.65 m.
+Pieces without a name are listed under their file name, so name your pieces to
+get an itemised list. Print it out to take to the fabric shop.
+
+## Saving and reopening a project
+
+Two buttons in the top bar:
+
+- **Save project** — saves a `.gnp` (Grain-Nest Project) file (the name defaults
+  to `grain-nest-project.gnp`). Keep the `.gnp` ending.
+- **Open project** — opens a `.gnp` file. What's on screen is cleared and the
+  saved project loaded in its place.
+
+A project keeps your pieces with their names, grain rules, marked grain lines,
+tops, mirrors and mirror copies, cut-on-fold and marked folds, quantities, seam
+allowances, Nest ticks, sheets (with their names and fabrics), the Nest for
+choice, Woven/Knit and Nap.
+
+The `.gnp` file is **self-contained** — it holds a full copy of every imported
+SVG, so you can move it to another computer without the original files. If you
+later change the original SVG, import it again; the project's copy doesn't
+update by itself.
+
+Not saved: which preview tab was open, the zoom, and which layout was selected.
 
 ## Settings
 
-The **Settings** page (gear icon) has:
+Click the **gear** icon on the left. **set all to default** at the bottom puts
+everything back.
 
-- **Nesting** — display units; **space between pieces**; **packing
-  style** (*Gravity* pushes pieces towards one end and usually uses the
-  least fabric length).
-- **Seam allowance** — the woven and knit defaults (above).
-- **Export** — draw the **sheet border** (on by default — handy for
-  lining up a projector); a **gap between sheets** when a nest uses
-  several; the **calibration square** and its size.
-- **Advanced** (folded away) — curve and endpoint tolerances, rotations
-  for *Free* pieces, the scale for SVG files without units, and two
-  tuning knobs for the layout search. You shouldn't normally need these.
+- **Nesting**
+  - **Display units** — inches or mm.
+  - **Space between pieces** — a gap kept around every piece.
+  - **Packing style** — *Gravity* pushes pieces towards one end and usually
+    uses the least fabric length, so it's the best choice for fabric;
+    *Bounding box* keeps the layout as compact a rectangle as possible;
+    *Squeeze* packs pieces into each other's outlines.
+- **Seam allowance** — the default for wovens (12 mm) and knits (10 mm).
+- **Export**
+  - **Draw the sheet border** — on by default; handy for lining up a projector.
+  - **Gap between sheets** — space between sheets when a layout uses several.
+  - **Line width** — one width for every line (2 mm by default).
+  - **Cut line colour**, **Sew line colour**, **Grain line colour** and **Sheet
+    border colour** — see [Lines and colours](#lines-and-colours).
+  - **Calibration square** — on or off, and its size (4 inches by default).
+- **Advanced** (folded away) — curve and endpoint tolerances, **Rotations for
+  Free pieces** (how many turns a *Free* piece may try — it doesn't affect any
+  other rule), the scale for SVG files without units, and two settings for the
+  layout search. You shouldn't normally need these.
 
-Grain-Nest imports **SVG files only**.
+## Other handy bits
+
+- **Dark mode** — the dark-mode button at the bottom of the left-hand bar
+  switches between light and dark. Grain-Nest remembers your choice.
+- **Info tab** — the info button on the left-hand bar shows the version you're running,
+  where Grain-Nest comes from, a link to its source code and its licences.
+- **Update notice** — when a newer version of Grain-Nest is published, a notice
+  pops up a few seconds after you open the app, with a link to download it.
+  Click **OK** and it won't show again for that version.
+- **Keyboard**
+  - **Delete** or **Backspace** deletes the selected rows (after asking) — but
+    never while you're typing in a box, or while marking.
+  - **Esc** cancels Mark grain, Re-mark or Mark fold.
+
+## Example files
+
+Two example files come with Grain-Nest:
+
+- [example-pattern.svg](../examples/example-pattern.svg) — a made-up dress
+  pattern set out the recommended way: one **Pieces** layer, and a group per
+  piece (labelled like `2 Bodice Back C2M`) holding its cutting line and its
+  `grain-<n>` grain line. The cut-on-fold pieces have their grain line on the
+  fold edge, and the notches are short sub-paths of the cutting line. Open it in
+  Inkscape to see how a piece is put together, or import it into Grain-Nest to
+  try things out.
+- [example-export.svg](../examples/example-export.svg) — that pattern nested on a
+  150 cm × 3 m sheet: the OF pieces cut on the fold, and the C2 pieces with
+  mirror copies. It shows the layers and groups described in
+  [What's in the exported SVG](#whats-in-the-exported-svg).
+
+## Common things that go wrong
+
+- **A piece comes in as Free when it has a grain line.** The line wasn't
+  recognised: check it's straight with two points, and that its ID contains
+  `grain` (or its Label is exactly `grainline`) — a Label of just "Grain" isn't
+  enough. See [Setting up a pattern in Inkscape](#setting-up-a-pattern-in-inkscape).
+  Or simply click **Mark grain**.
+- **A piece is missing, or a cutting line comes in as several pieces.** The
+  cutting line probably isn't one closed shape — join its ends in Inkscape.
+- **Every piece has the same name, or the wrong one.** Check the Label on each
+  piece's group, and that the cutting line hasn't got a different Label of its
+  own.
+- **Cut on fold says it can't fold the piece, or doubles it the wrong way.** The
+  grain line isn't on the fold edge. Click **Unfold** if needed, then **Mark
+  fold** and click the fold edge in the preview.
+- **A piece is upside down in the layout.** Click **Flip top** and nest again.
+- **A piece is turned the wrong way.** Check its grain rule — **Bias** and
+  **Grain or flipped** turn pieces on purpose. A bias piece whose pattern
+  already draws the grain diagonally wants **Lock to grain**.
+- **A piece doesn't show up under a Nest for job.** Check its cut code is
+  written exactly (capital C, capital letter, separate word), then pick another
+  job and back to re-sort.
+- **The dashed grain line looks a bit off after marking.** That's fine — only the
+  angle is stored, drawn through the middle of the piece. If the angle looks
+  wrong, click **Re-mark**.
+- **The layout uses more fabric than expected.** Try leaving the nest running
+  longer, picking the shortest layout in **best nests so far**, choosing
+  **Gravity** in Settings, or giving plain fabrics **Grain or flipped**.
 
 ## Things this version doesn't do (yet)
 
-- **Pattern matching** (stripes / plaids).
-- **Long piece names** can spill over small pieces in the exported SVG.
-- **Tighter nests.** The layout search could sometimes pack pieces more
-  tightly; the "best nests so far" list (least fabric first) helps you
-  pick the tightest one meanwhile.
-- **Grain lines in the export.** The exported SVG includes the dashed
-  grain lines as decoration; an option to leave them out would tidy the
-  output.
-- **Grain tolerance setting.** The "Custom tolerance" rule is fixed at
-  ±3°.
+- **Pattern matching** (stripes and checks).
+- **Tighter nests.** The layout search could sometimes pack pieces more tightly;
+  the "best nests so far" list (least fabric first) helps you pick the tightest
+  one meanwhile.
+- **Grain tolerance setting.** The Custom tolerance rule is fixed at ±3°.
 
 ## Where else to look
 
-- [README](../README.md) — overview, install and building from source.
+- [README](../README.md) — overview, installing and building from source.

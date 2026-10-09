@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape" width="1600.0mm" height="1550.0mm" viewBox="0 0 1600.000 1550.000">
+  <g id="layer-pieces" inkscape:groupmode="layer" inkscape:label="Pieces">
+    <g id="group-1_Bodice_Front_C1MOF" inkscape:label="1 Bodice Front C1MOF">
+      <path id="piece-1_Bodice_Front_C1MOF" inkscape:label="1 Bodice Front C1MOF" d="M 0.00,0.25 L 70.00,0.25 L 82.19,0.00 L 94.11,0.72 L 105.76,2.40 L 117.14,5.04 L 128.26,8.65 L 139.11,13.22 L 149.69,18.75 L 160.00,25.25 L 175.00,150.25 L 169.38,172.50 L 165.01,194.83 L 161.89,217.23 L 160.02,239.69 L 159.39,262.23 L 160.01,284.83 L 161.88,307.50 L 165.00,330.25 L 0.00,330.25 Z M 82.50,330.25 L 82.50,324.25 M 164.50,62.75 L 158.54,63.46" style="fill:none;stroke:#000000;stroke-width:0.5"/>
+      <path id="grain-1" inkscape:label="grain-1" d="M 0.00,40.25 L 0.00,300.25" style="fill:none;stroke:#d4008c;stroke-width:0.5"/>
+    </g>
+    <g id="group-2_Bodice_Back_C2M" inkscape:label="2 Bodice Back C2M">
+      <path id="piece-2_Bodice_Back_C2M" inkscape:label="2 Bodice Back C2M" d="M 225.00,0.00 L 285.00,10.00 L 390.00,20.00 L 405.00,150.00 L 395.00,340.00 L 235.00,340.00 Z M 261.00,6.00 L 260.01,11.92 M 401.00,226.00 L 395.01,225.68 M 230.00,170.00 L 236.00,169.82" style="fill:none;stroke:#000000;stroke-width:0.5"/>
+      <path id="grain-2" inkscape:label="grain-2" d="M 315.00,60.00 L 315.00,300.00" style="fill:none;stroke:#d4008c;stroke-width:0.5"/>
+    </g>
+    <g id="group-3_Sleeve_C2M" inkscape:label="3 Sleeve C2M">
+      <path id="piece-3_Sleeve_C2M" inkscape:label="3 Sleeve C2M" d="M 455.00,120.00 L 460.69,97.61 L 468.68,77.33 L 478.97,59.16 L 491.57,43.11 L 506.47,29.16 L 523.68,17.33 L 543.19,7.61 L 565.00,0.00 L 586.81,7.61 L 606.32,17.33 L 623.53,29.16 L 638.43,43.11 L 651.03,59.16 L 661.32,77.33 L 669.31,97.61 L 675.00,120.00 L 645.00,420.00 L 485.00,420.00 Z M 499.02,36.13 L 503.12,40.52 M 630.98,36.13 L 626.88,40.52" style="fill:none;stroke:#000000;stroke-width:0.5"/>
+      <path id="grain-3" inkscape:label="grain-3" d="M 565.00,60.00 L 565.00,380.00" style="fill:none;stroke:#d4008c;stroke-width:0.5"/>
+    </g>
+    <g id="group-4_Neck_Facing_C1M_C1I" inkscape:label="4 Neck Facing C1M C1I">
+      <path id="piece-4_Neck_Facing_C1M_C1I" inkscape:label="4 Neck Facing C1M C1I" d="M 725.00,0.00 L 765.00,0.00 L 782.00,0.00 L 797.72,2.14 L 812.15,6.43 L 825.29,12.85 L 837.15,21.43 L 847.72,32.14 L 857.00,45.00 L 865.00,60.00 L 865.00,110.00 L 855.95,93.87 L 845.55,79.85 L 833.82,67.93 L 820.74,58.13 L 806.32,50.43 L 790.55,44.85 L 773.45,41.37 L 755.00,40.00 L 725.00,40.00 Z" style="fill:none;stroke:#000000;stroke-width:0.5"/>
+      <path id="grain-4" inkscape:label="grain-4" d="M 735.00,5.00 L 735.00,35.00" style="fill:none;stroke:#d4008c;stroke-width:0.5"/>
+    </g>
+    <g id="group-5_Pocket_C2M_C2I" inkscape:label="5 Pocket C2M C2I">
+      <path id="piece-5_Pocket_C2M_C2I" inkscape:label="5 Pocket C2M C2I" d="M 915.00,0.00 L 1065.00,0.00 L 1065.00,140.00 L 1046.25,129.06 L 1027.50,121.25 L 1008.75,116.56 L 990.00,115.00 L 971.25,116.56 L 952.50,121.25 L 933.75,129.06 L 915.00,140.00 Z M 990.00,0.00 L 990.00,6.00" style="fill:none;stroke:#000000;stroke-width:0.5"/>
+      <path id="grain-5" inkscape:label="grain-5" d="M 990.00,20.00 L 990.00,120.00" style="fill:none;stroke:#d4008c;stroke-width:0.5"/>
+    </g>
+    <g id="group-6_Skirt_Front_C1MOF" inkscape:label="6 Skirt Front C1MOF">
+      <path id="piece-6_Skirt_Front_C1MOF" inkscape:label="6 Skirt Front C1MOF" d="M 1115.00,0.00 L 1305.00,0.00 L 1375.00,600.00 L 1115.00,600.00 Z M 1315.50,90.00 L 1309.54,90.70 M 1347.00,360.00 L 1341.04,360.70" style="fill:none;stroke:#000000;stroke-width:0.5"/>
+      <path id="grain-6" inkscape:label="grain-6" d="M 1115.00,60.00 L 1115.00,540.00" style="fill:none;stroke:#d4008c;stroke-width:0.5"/>
+    </g>
+    <g id="group-7_Skirt_Back_C2M" inkscape:label="7 Skirt Back C2M">
+      <path id="piece-7_Skirt_Back_C2M" inkscape:label="7 Skirt Back C2M" d="M 20.00,650.00 L 220.00,650.00 L 290.00,1250.00 L 0.00,1250.00 Z M 230.50,740.00 L 224.54,740.70 M 10.00,950.00 L 16.00,950.20" style="fill:none;stroke:#000000;stroke-width:0.5"/>
+      <path id="grain-7" inkscape:label="grain-7" d="M 130.00,710.00 L 130.00,1190.00" style="fill:none;stroke:#d4008c;stroke-width:0.5"/>
+    </g>
+    <g id="group-8_Waist_Tie_C2M" inkscape:label="8 Waist Tie C2M">
+      <path id="piece-8_Waist_Tie_C2M" inkscape:label="8 Waist Tie C2M" d="M 340.00,650.00 L 380.00,650.00 L 380.00,1550.00 L 340.00,1550.00 Z M 380.00,1100.00 L 374.00,1100.00" style="fill:none;stroke:#000000;stroke-width:0.5"/>
+      <path id="grain-8" inkscape:label="grain-8" d="M 360.00,690.00 L 360.00,1510.00" style="fill:none;stroke:#d4008c;stroke-width:0.5"/>
+    </g>
+    <g id="group-9_Lining_Front_C1LOF" inkscape:label="9 Lining Front C1LOF">
+      <path id="piece-9_Lining_Front_C1LOF" inkscape:label="9 Lining Front C1LOF" d="M 430.00,650.00 L 610.00,650.00 L 670.00,1210.00 L 430.00,1210.00 Z" style="fill:none;stroke:#000000;stroke-width:0.5"/>
+      <path id="grain-9" inkscape:label="grain-9" d="M 430.00,690.00 L 430.00,1170.00" style="fill:none;stroke:#d4008c;stroke-width:0.5"/>
+    </g>
+    <g id="group-10_Cuff_C2R" inkscape:label="10 Cuff C2R">
+      <path id="piece-10_Cuff_C2R" inkscape:label="10 Cuff C2R" d="M 720.00,650.00 L 940.00,650.00 L 940.00,720.00 L 720.00,720.00 Z" style="fill:none;stroke:#000000;stroke-width:0.5"/>
+      <path id="grain-10" inkscape:label="grain-10" d="M 740.00,685.00 L 920.00,685.00" style="fill:none;stroke:#d4008c;stroke-width:0.5"/>
+    </g>
+    <g id="group-INT1_Waistband_Interfacing" inkscape:label="INT1 Waistband Interfacing">
+      <path id="piece-INT1_Waistband_Interfacing" inkscape:label="INT1 Waistband Interfacing" d="M 990.00,650.00 L 1025.00,650.00 L 1025.00,1370.00 L 990.00,1370.00 Z" style="fill:none;stroke:#000000;stroke-width:0.5"/>
+      <path id="grain-INT1" inkscape:label="grain-INT1" d="M 1007.00,680.00 L 1007.00,1340.00" style="fill:none;stroke:#d4008c;stroke-width:0.5"/>
+    </g>
+  </g>
+</svg>

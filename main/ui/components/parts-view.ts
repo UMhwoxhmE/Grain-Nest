@@ -344,6 +344,8 @@ export class PartsViewService {
    * left-clicks anywhere on the page are captured as grain endpoints.
    */
   private markingPartIndex: number | null = null;
+  /** v1.5.0: what the marking clicks are for — a grain line or a fold edge. */
+  private markingKind: "grain" | "fold" = "grain";
   /** First click point in marking mode (pixels). */
   private markingStartPoint: { x: number; y: number } | null = null;
 
@@ -414,16 +416,12 @@ export class PartsViewService {
    * @param part - The part to toggle
    */
   private togglePart(part: Part): void {
-    if (part.selected) {
-      part.selected = false;
-      for (let i = 0; i < part.svgelements.length; i++) {
-        part.svgelements[i].removeAttribute("class");
-      }
-    } else {
-      part.selected = true;
-      for (let i = 0; i < part.svgelements.length; i++) {
-        part.svgelements[i].setAttribute("class", CSS_CLASSES.ACTIVE);
-      }
+    // v1.5.0: add / remove just the "active" class, keeping any class the
+    // element came with (e.g. Seamly2D's "grainline"); replacing the whole
+    // attribute lost those and left "active" in exported files.
+    part.selected = !part.selected;
+    for (let i = 0; i < part.svgelements.length; i++) {
+      part.svgelements[i].classList.toggle(CSS_CLASSES.ACTIVE, part.selected);
     }
   }
 
@@ -858,6 +856,19 @@ export class PartsViewService {
       },
     );
 
+    // v1.5.0: "Mark fold" — the next click on the import preview picks the
+    // piece's fold edge.
+    ractive.on(
+      "markfold",
+      (_e: RactiveEvent, ...args: unknown[]): boolean | void => {
+        const part = args[0] as Part;
+        const idx = deepNest.parts.indexOf(part);
+        if (idx === -1) return false;
+        this.startMarkingMode(idx, "fold");
+        return false;
+      },
+    );
+
     // §9.3.2: toggle the mirror flag on the clicked part (or undo if
     // already mirrored). ractive.update("parts") also redraws the thumbnail
     // (see fillThumbnails).
@@ -916,8 +927,9 @@ export class PartsViewService {
           deepNest.unfoldPart(idx);
         } else if (!deepNest.foldPart(idx)) {
           message(
-            "To cut on the fold, the piece needs a grain or fold line drawn " +
-              "on the fold edge in the SVG.",
+            "To cut on the fold, click Mark fold and then the piece's fold " +
+              "edge in the preview, or draw its grain line on the fold edge " +
+              "in the pattern file.",
           );
         }
         ractive.update("parts");
@@ -1228,6 +1240,7 @@ export class PartsViewService {
         // parts-table button that opened the mode.
         if (target.closest("#grainmarker-banner")) return;
         if (target.closest(".markgrain")) return;
+        if (target.closest(".markfold")) return;
         // §9.3.2: don't swallow Mirror / Mirror copy clicks as grain
         // endpoints when the user is in marking mode.
         if (target.closest(".mirror")) return;
@@ -1252,8 +1265,12 @@ export class PartsViewService {
   /**
    * Enter marking mode for the part at the given index.
    */
-  private startMarkingMode(partIndex: number): void {
+  private startMarkingMode(
+    partIndex: number,
+    kind: "grain" | "fold" = "grain",
+  ): void {
     this.markingPartIndex = partIndex;
+    this.markingKind = kind;
     this.markingStartPoint = null;
     const banner = document.getElementById("grainmarker-banner");
     const text = document.getElementById("grainmarker-text");
@@ -1261,8 +1278,86 @@ export class PartsViewService {
       const part = this.deepNest.parts[partIndex];
       const label =
         (part && (part.name || part.filename)) || `piece ${partIndex + 1}`;
-      text.textContent = `Mark the grain line for ${label}: click its bottom end, then its top end. Press Esc to cancel.`;
+      text.textContent =
+        kind === "fold"
+          ? `Mark the fold for ${label}: click its fold edge in the preview on the right. Press Esc to cancel.`
+          : `Mark the grain line for ${label}: click its bottom end, then its top end. Press Esc to cancel.`;
       banner.classList.add("active");
+    }
+    // The preview has to show this piece's file for a fold click.
+    if (kind === "fold") this.showImportFor(partIndex);
+  }
+
+  /** v1.5.0: switch the import preview to the file a piece came from. */
+  private showImportFor(partIndex: number): void {
+    const importIdx = this.importIndexFor(partIndex);
+    if (importIdx === -1) return;
+    this.deepNest.imports.forEach((im, i) => (im.selected = i === importIdx));
+    if (this.ractive) {
+      (this.ractive as unknown as { update(k?: string): void }).update(
+        "imports",
+      );
+    }
+  }
+
+  private importIndexFor(partIndex: number): number {
+    const part = this.deepNest.parts[partIndex];
+    if (!part) return -1;
+    const byRef = part.importRef
+      ? this.deepNest.imports.indexOf(part.importRef)
+      : -1;
+    return byRef !== -1
+      ? byRef
+      : this.deepNest.imports.findIndex((im) => im.filename === part.filename);
+  }
+
+  /**
+   * v1.5.0: a click while marking a fold. Converts the click to the
+   * drawing's coordinates in the preview and folds the piece along the
+   * outline edge nearest to it.
+   */
+  private handleFoldClick(x: number, y: number): void {
+    const idx = this.markingPartIndex;
+    if (idx === null) return;
+    const text = document.getElementById("grainmarker-text");
+    const importIdx = this.importIndexFor(idx);
+    const liveSvg = document
+      .getElementById(`import-${importIdx}`)
+      ?.querySelector("svg") as SVGSVGElement | null;
+    const box = liveSvg?.getBoundingClientRect();
+    if (
+      !liveSvg ||
+      !box ||
+      x < box.left ||
+      x > box.right ||
+      y < box.top ||
+      y > box.bottom
+    ) {
+      if (text)
+        text.textContent =
+          "Click the piece's fold edge in the preview on the right (Esc to cancel).";
+      return;
+    }
+    // Use a drawn shape's own frame: its coordinates are the pieces'
+    // coordinates (the preview of a mm file is scaled differently from the
+    // svg root, and pan/zoom adds its own transform).
+    const frame =
+      (liveSvg.querySelector(
+        "path, polygon, polyline, rect, line, circle, ellipse",
+      ) as SVGGraphicsElement | null) || liveSvg;
+    const ctm = frame.getScreenCTM();
+    if (!ctm) return;
+    const p = new DOMPoint(x, y).matrixTransform(ctm.inverse());
+    const ok = this.deepNest.markFoldEdge(idx, { x: p.x, y: p.y });
+    this.cancelMarkingMode();
+    if (!ok) {
+      message(
+        "Couldn't fold the piece along that edge. Click right on its straight fold edge.",
+        true,
+      );
+    }
+    if (this.ractive) {
+      (this.ractive as unknown as { update(k?: string): void }).update("parts");
     }
   }
 
@@ -1285,6 +1380,10 @@ export class PartsViewService {
    */
   private handleMarkingClick(x: number, y: number, shiftKey: boolean): void {
     if (this.markingPartIndex === null) return;
+    if (this.markingKind === "fold") {
+      this.handleFoldClick(x, y);
+      return;
+    }
 
     if (this.markingStartPoint === null) {
       this.markingStartPoint = { x, y };

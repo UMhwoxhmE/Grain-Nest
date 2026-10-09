@@ -13,6 +13,8 @@ It's a Mac app (Apple Silicon), built on the open-source
   `class="grainline"`, Inkscape layers or ids containing `grain`), or you
   mark it by hand with two clicks. Each piece gets a grain rule: on grain,
   grain or flipped, bias, free or a custom tolerance.
+- **Cut on fold** along the grain line drawn on the fold edge, or click
+  **Mark fold** and then the fold edge in the preview.
 - **Dressmaking pieces.** Cut on fold, mirrored pieces (in place or as a
   copy), a top end for each piece, nap (one-way fabric), and seam
   allowances with sew lines. Woven and knit projects have their own
@@ -20,12 +22,16 @@ It's a Mac app (Apple Silicon), built on the open-source
 - **Fabrics and sheets.** Name each sheet and say which fabric it is for
   (main, lining, interfacing, fused…). **Nest for** picks the pieces for
   one fabric from the cut codes in their names (e.g. `C2M` = cut 2 main).
-- **Results.** A list of the best layouts so far, sorted by fabric used,
-  exported as SVG (with sheet borders and a calibration square, for
-  projector cutting) and as a cut list.
+- **Results.** A list of the best layouts so far, sorted by fabric used.
+  The SVG export is laid out like your pattern file — a layer per sheet,
+  a named group per piece with its cutting, sew and grain lines and its
+  name — with line colours and width from Settings, a sheet border and a
+  calibration square, ready for projector cutting (e.g. Pattern
+  Projector). There's a cut list too.
 - **Projects.** Save and reopen everything as a `.gnp` file.
 
-There's a full walkthrough in [docs/USAGE.md](docs/USAGE.md).
+There's a full walkthrough in [docs/USAGE.md](docs/USAGE.md), and an
+example pattern with its exported nest in [examples/](examples/).
 
 ## Install
 

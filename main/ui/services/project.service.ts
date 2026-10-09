@@ -94,6 +94,8 @@ interface SavedPart {
   cutOnFold?: boolean;
   /** §9.3.2 behaviour 3: fold line (piece coords, angle in radians). */
   foldLine?: { x0: number; y0: number; ang: number };
+  /** v1.5.0: fold edge marked in the app ("Mark fold"). */
+  markedFold?: { x0: number; y0: number; ang: number };
   /** §9.3.9: per-piece seam allowance in millimetres. */
   seamAllowance?: number;
   /** phase-r8a: left out of the nest (still in the list). Absent = included. */
@@ -294,6 +296,7 @@ export class ProjectService {
         mirror: p.mirror,
         cutOnFold: p.cutOnFold,
         foldLine: p.foldLine,
+        markedFold: p.markedFold,
         seamAllowance: p.seamAllowance,
         // v1.2.0: sheets can be excluded too, and carry a fabric.
         excluded: p.excluded || undefined,
@@ -674,6 +677,7 @@ export class ProjectService {
     // grain/fold element and rebuilds the doubled polygon. Done after
     // the mirror reconcile so a mirrored+folded piece composes the same
     // way it was built.
+    if (saved.markedFold) part.markedFold = saved.markedFold;
     if (saved.cutOnFold && !part.cutOnFold) {
       const fidx = this.deepNest.parts.indexOf(part);
       if (fidx >= 0) this.deepNest.foldPart(fidx);

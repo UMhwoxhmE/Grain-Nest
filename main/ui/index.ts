@@ -9,7 +9,6 @@ import type {
   UIConfig,
   ConfigObject,
   DeepNestInstance,
-  SvgParserInstance,
   RactiveInstance,
   NestViewData,
   NestingProgress,
@@ -23,10 +22,6 @@ import {
   createConfigService,
   BOOLEAN_CONFIG_KEYS,
 } from "./services/config.service.js";
-import {
-  PresetService,
-  createPresetService,
-} from "./services/preset.service.js";
 import {
   ImportService,
   createImportService,
@@ -117,22 +112,10 @@ declare function require(module: string): unknown;
 declare let DeepNest: DeepNestInstance;
 
 /**
- * Global SvgParser instance
- */
-declare let SvgParser: SvgParserInstance;
-
-/**
  * Get the DeepNest global with proper typing
  */
 function getDeepNest(): DeepNestInstance {
   return DeepNest;
-}
-
-/**
- * Get the SvgParser global with proper typing
- */
-function getSvgParser(): SvgParserInstance {
-  return SvgParser;
 }
 
 /**
@@ -200,7 +183,6 @@ function showInitBanner(step: string, err: unknown): void {
  * Module instances for cross-module communication
  */
 let configService: ConfigService;
-let presetService: PresetService;
 let importService: ImportService;
 let exportService: ExportService;
 let nestingService: NestingService;
@@ -293,12 +275,6 @@ function updateForm(c: UIConfig): void {
   const inputs = document.querySelectorAll("#config input, #config select");
   inputs.forEach((i) => {
     const inputElement = i as HTMLInputElement | HTMLSelectElement;
-    const inputId = inputElement.getAttribute("id");
-
-    // Skip preset-related inputs
-    if (inputId && ["presetSelect", "presetName"].includes(inputId)) {
-      return;
-    }
 
     const key = inputElement.getAttribute("data-config") as
       | keyof UIConfig
@@ -332,187 +308,6 @@ function updateForm(c: UIConfig): void {
 }
 
 /**
- * Load presets into the dropdown
- */
-async function loadPresetList(): Promise<void> {
-  const presets = await presetService.loadPresets();
-  const presetSelect = getElement<HTMLSelectElement>("#presetSelect");
-
-  if (!presetSelect) {
-    return;
-  }
-
-  // Clear dropdown (except first option)
-  while (presetSelect.options.length > 1) {
-    presetSelect.remove(1);
-  }
-
-  // Add presets to dropdown
-  for (const name in presets) {
-    const option = document.createElement("option");
-    option.value = name;
-    option.textContent = name;
-    presetSelect.appendChild(option);
-  }
-}
-
-/**
- * Initialize preset modal functionality
- */
-function initializePresetModal(): void {
-  const savePresetBtn = getElement<HTMLElement>("#savePresetBtn");
-  const loadPresetBtn = getElement<HTMLElement>("#loadPresetBtn");
-  const deletePresetBtn = getElement<HTMLElement>("#deletePresetBtn");
-  const presetSelect = getElement<HTMLSelectElement>("#presetSelect");
-  const presetModal = getElement<HTMLElement>("#preset-modal");
-  const confirmSavePresetBtn = getElement<HTMLElement>("#confirmSavePreset");
-  const presetNameInput = getElement<HTMLInputElement>("#presetName");
-
-  if (!presetModal) {
-    return;
-  }
-
-  const closeModalBtn = presetModal.querySelector(".close");
-
-  // Save preset button click - opens modal
-  if (savePresetBtn) {
-    savePresetBtn.addEventListener("click", (e) => {
-      e.preventDefault();
-      if (presetNameInput) {
-        presetNameInput.value = "";
-      }
-      presetModal.style.display = "block";
-      document.body.classList.add("modal-open");
-      if (presetNameInput) {
-        presetNameInput.focus();
-      }
-    });
-  }
-
-  // Close modal when clicking X
-  if (closeModalBtn) {
-    closeModalBtn.addEventListener("click", (e) => {
-      e.preventDefault();
-      presetModal.style.display = "none";
-      document.body.classList.remove("modal-open");
-    });
-  }
-
-  // Close modal when clicking outside
-  window.addEventListener("click", (event) => {
-    if (event.target === presetModal) {
-      presetModal.style.display = "none";
-      document.body.classList.remove("modal-open");
-    }
-  });
-
-  // Confirm save preset
-  if (confirmSavePresetBtn) {
-    confirmSavePresetBtn.addEventListener("click", async (e) => {
-      e.preventDefault();
-      const name = presetNameInput?.value.trim() || "";
-      if (!name) {
-        alert("Please enter a preset name");
-        return;
-      }
-
-      try {
-        await presetService.savePreset(
-          name,
-          configService.getSync() as unknown as ConfigResult,
-        );
-        presetModal.style.display = "none";
-        document.body.classList.remove("modal-open");
-        await loadPresetList();
-        if (presetSelect) {
-          presetSelect.value = name;
-        }
-        message("Preset saved successfully!");
-      } catch {
-        message("Error saving preset", true);
-      }
-    });
-  }
-
-  // Load preset button click
-  if (loadPresetBtn) {
-    loadPresetBtn.addEventListener("click", async (e) => {
-      e.preventDefault();
-      const selectedPreset = presetSelect?.value || "";
-      if (!selectedPreset) {
-        message("Please select a preset to load");
-        return;
-      }
-
-      try {
-        const presetConfig = await presetService.getPreset(selectedPreset);
-
-        if (presetConfig) {
-          // Preserve user profile
-          const tempAccess = configService.getSync("access_token") as
-            | string
-            | undefined;
-          const tempId = configService.getSync("id_token") as
-            | string
-            | undefined;
-
-          // Apply preset settings
-          configService.setSync(presetConfig);
-
-          // Restore user profile
-          if (tempAccess !== undefined) {
-            configService.setSync("access_token", tempAccess);
-          }
-          if (tempId !== undefined) {
-            configService.setSync("id_token", tempId);
-          }
-
-          // Update UI and notify DeepNest
-          const cfgValues = configService.getSync() as unknown as ConfigResult;
-          getDeepNest().config(cfgValues);
-          updateForm(cfgValues);
-
-          message("Preset loaded successfully!");
-        } else {
-          message("Selected preset not found", true);
-        }
-      } catch {
-        message("Error loading preset", true);
-      }
-    });
-  }
-
-  // Delete preset button click
-  if (deletePresetBtn) {
-    deletePresetBtn.addEventListener("click", async (e) => {
-      e.preventDefault();
-      const selectedPreset = presetSelect?.value || "";
-      if (!selectedPreset) {
-        message("Please select a preset to delete");
-        return;
-      }
-
-      if (
-        confirm(
-          `Are you sure you want to delete the preset "${selectedPreset}"?`,
-        )
-      ) {
-        try {
-          await presetService.deletePreset(selectedPreset);
-          await loadPresetList();
-          if (presetSelect) {
-            presetSelect.selectedIndex = 0;
-          }
-          message("Preset deleted successfully!");
-        } catch {
-          message("Error deleting preset", true);
-        }
-      }
-    });
-  }
-}
-
-/**
  * Initialize config form change handlers
  */
 function initializeConfigForm(): void {
@@ -520,12 +315,6 @@ function initializeConfigForm(): void {
 
   inputs.forEach((i) => {
     const inputElement = i as HTMLInputElement | HTMLSelectElement;
-    const inputId = inputElement.getAttribute("id");
-
-    // Skip preset-related inputs
-    if (inputId && ["presetSelect", "presetName"].includes(inputId)) {
-      return;
-    }
 
     inputElement.addEventListener("change", () => {
       let val: string | number | boolean = inputElement.value;
@@ -753,9 +542,6 @@ async function initializeServices(): Promise<void> {
     }
   ).config = configService as unknown as ConfigObject;
 
-  // Create preset service
-  presetService = createPresetService(ipcRenderer);
-
   // Get config values and configure DeepNest
   const cfgValues = configService.getSync() as unknown as ConfigResult;
   getDeepNest().config(cfgValues);
@@ -890,7 +676,6 @@ function initializeComponents(): void {
       ) => K extends keyof UIConfig ? UIConfig[K] : UIConfig;
     },
     deepNest: getDeepNest(),
-    svgParser: getSvgParser(),
     // Note: exportButton set separately after initialization via setExportButton
   });
 
@@ -1309,9 +1094,7 @@ async function initialize(): Promise<void> {
   };
 
   await step("initializeServices", () => initializeServices());
-  await step("loadPresetList", () => loadPresetList());
   await step("initializeComponents", () => initializeComponents());
-  await step("initializePresetModal", () => initializePresetModal());
   await step("initializeConfigForm", () => initializeConfigForm());
   await step("initializeBackgroundProgress", () =>
     initializeBackgroundProgress(),
@@ -1352,7 +1135,6 @@ ready(initialize);
  */
 export {
   configService,
-  presetService,
   importService,
   exportService,
   nestingService,

@@ -1447,6 +1447,9 @@ export class DeepNest {
     if (!part || part.sheet) return;
     var axisX = part.bounds.x + part.bounds.width / 2;
     mirrorPolygontreeX(part.polygontree, axisX);
+    // v1.5.0: a cut-on-fold piece keeps its unfolded half for Unfold; flip
+    // it too, so unfolding a mirrored piece gives the mirrored half.
+    if (part._foldHalfTree) mirrorPolygontreeX(part._foldHalfTree, axisX);
     if (typeof part.grainAngle === "number") {
       var a = ((180 - part.grainAngle) % 360 + 360) % 360;
       // phase-r8c: the top end of the grain line mirrors with the piece.
@@ -1542,7 +1545,22 @@ export class DeepNest {
       // phase-r8a: a copy starts in the same nest job as its source.
       excluded: src.excluded,
       sheet: false,
-      mirror: false,
+      // v1.5.0: starts in the source's state; mirrorPart below flips the
+      // outline and the flag together, so the copy is the opposite of its
+      // source. (It used to start false: a copy of a mirrored piece got the
+      // un-mirrored outline but mirror=true, so it was drawn flipped.)
+      mirror: !!src.mirror,
+      // v1.5.0: a copy of a cut-on-fold piece is cut on the fold too. It
+      // used to be nested as the doubled shape but drawn and exported as
+      // the half, because the fold state wasn't copied.
+      cutOnFold: !!src.cutOnFold,
+      foldLine: src.foldLine
+        ? { x0: src.foldLine.x0, y0: src.foldLine.y0, ang: src.foldLine.ang }
+        : undefined,
+      _foldHalfTree: src._foldHalfTree ? this.cloneTree(src._foldHalfTree) : undefined,
+      markedFold: src.markedFold
+        ? { x0: src.markedFold.x0, y0: src.markedFold.y0, ang: src.markedFold.ang }
+        : undefined,
       // §9.3.3: tag so save/load can distinguish copies from import-
       // origin parts (they share filename but have different lineage).
       isMirrorCopy: true,
@@ -1571,6 +1589,16 @@ export class DeepNest {
   foldPart(partIndex) {
     var part = this.parts[partIndex];
     if (!part || part.sheet || part.cutOnFold) return false;
+    // v1.5.0: the fold line is read from the piece's own drawing (source
+    // frame), so fold a mirrored piece un-mirrored and mirror it back after
+    // (about the doubled piece's centre, as the export and thumbnails do).
+    // Folding a mirrored piece used to reflect across the wrong line.
+    if (part.mirror) {
+      this.mirrorPart(partIndex);
+      var ok = this.foldPart(partIndex);
+      this.mirrorPart(partIndex);
+      return ok;
+    }
     var fold = getFoldLineForPart(part);
     // §9.0.1 / phase-5t fix: snap the axis onto the piece's true fold edge so a
     // grain line drawn a hair off the edge still doubles cleanly (piece 5's axis
@@ -1697,9 +1725,52 @@ export class DeepNest {
   };
 
   // Undo foldPart: restore the stored half polygon.
+  // v1.5.0: "Mark fold" — the user clicked near the fold edge of the piece
+  // in the import preview (`point`, in the drawing's own coordinates). The
+  // nearest edge of the piece's outline becomes its fold line, and the piece
+  // is cut on the fold. Returns false if there's no outline to snap to.
+  markFoldEdge(partIndex, point) {
+    var part = this.parts[partIndex];
+    if (!part || part.sheet || part.cutOnFold || !part.polygontree) return false;
+    var ring = part.polygontree;
+    var cx = part.bounds.x + part.bounds.width / 2;
+    // The preview shows the drawing un-mirrored; compare in that frame.
+    var pt = function (k) {
+      var q = ring[k];
+      return part.mirror ? { x: 2 * cx - q.x, y: q.y } : { x: q.x, y: q.y };
+    };
+    var best = null;
+    for (var i = 0; i < ring.length; i++) {
+      var a = pt(i);
+      var b = pt((i + 1) % ring.length);
+      var dx = b.x - a.x;
+      var dy = b.y - a.y;
+      var len2 = dx * dx + dy * dy;
+      if (len2 === 0) continue;
+      var t = Math.max(0, Math.min(1, ((point.x - a.x) * dx + (point.y - a.y) * dy) / len2));
+      var d = Math.hypot(point.x - (a.x + t * dx), point.y - (a.y + t * dy));
+      if (!best || d < best.d) best = { d: d, a: a, b: b };
+    }
+    if (!best) return false;
+    part.markedFold = {
+      x0: best.a.x,
+      y0: best.a.y,
+      ang: Math.atan2(best.b.y - best.a.y, best.b.x - best.a.x),
+    };
+    return this.foldPart(partIndex);
+  };
+
   unfoldPart(partIndex) {
     var part = this.parts[partIndex];
     if (!part || !part.cutOnFold) return false;
+    // v1.5.0: as foldPart — unfold un-mirrored, then mirror the half back
+    // about its own centre.
+    if (part.mirror) {
+      this.mirrorPart(partIndex);
+      var ok = this.unfoldPart(partIndex);
+      this.mirrorPart(partIndex);
+      return ok;
+    }
     if (part._foldHalfTree) {
       part.polygontree = part._foldHalfTree;
       delete part._foldHalfTree;
@@ -2349,6 +2420,11 @@ function unionRingsFold(ringA, ringB) {
 // {x0, y0, ang(rad)} or null.
 function getFoldLineForPart(part) {
   if (!part || !part.svgelements) return null;
+  // v1.5.0: a fold edge marked in the app ("Mark fold") wins over the
+  // drawing's grain / fold line.
+  if (part.markedFold) {
+    return { x0: part.markedFold.x0, y0: part.markedFold.y0, ang: part.markedFold.ang };
+  }
   function finish(x1, y1, x2, y2) {
     if (
       !isFinite(x1) || !isFinite(y1) || !isFinite(x2) || !isFinite(y2) ||

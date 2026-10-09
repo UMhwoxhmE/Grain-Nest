@@ -274,8 +274,8 @@
           								<option value="custom">Custom tolerance</option>
           							</select>
           							{{/if}}
-          							{{#if (grainSource === 'manual-required' || grainSource === 'manual') && !sheet}}
-          								<a href="#" class="markgrain" on-click="markgrain:{{this}}">{{ grainSource === 'manual' ? 'Re-mark' : 'Mark grain' }}</a>
+          							{{#if grainSource && !sheet}}
+          								<a href="#" class="markgrain" on-click="markgrain:{{this}}">{{ grainSource === 'manual-required' ? 'Mark grain' : 'Re-mark' }}</a>
           							{{/if}}
           						</td>
           						<td class="rowactions">
@@ -286,6 +286,9 @@
           								<a href="#" class="mirror" on-click="mirrortoggle:{{this}}">{{ mirror ? 'Unmirror' : 'Mirror' }}</a>
           								<a href="#" class="mirror" on-click="mirrorcopy:{{this}}">Mirror copy</a>
           								<a href="#" class="mirror" on-click="foldtoggle:{{this}}">{{ cutOnFold ? 'Unfold' : 'Cut on fold' }}</a>
+          								{{#if !cutOnFold}}
+          									<a href="#" class="mirror markfold" on-click="markfold:{{this}}" title="Click the piece's fold edge in the preview on the right; the piece is then cut on the fold along that edge">Mark fold</a>
+          								{{/if}}
           							{{/if}}
           						</td>
           					</tr>
@@ -346,8 +349,12 @@
           				<option value="177">70 in (177 cm)</option>
           			</select>
           		</span>
-          		<span class="row"><span class="label">width</span> <input type="number" min="0" id="sheetwidth" required /> {{ getUnits }}</span>
-          		<span class="row"><span class="label">height</span> <input type="number" min="0" id="sheetheight" required /> {{ getUnits }}</span>
+          		<!-- v1.5.0: labelled in fabric terms. The sheet lies with its length
+          		     across the screen, so the fabric width (selvedge to selvedge) is
+          		     the sheet's height (#sheetheight) and its length is the width
+          		     (#sheetwidth); the ids keep the drawing sense. -->
+          		<span class="row" title="Selvedge to selvedge"><span class="label">Fabric width</span> <input type="number" min="0" id="sheetheight" required /> {{ getUnits }}</span>
+          		<span class="row" title="How much fabric, along the selvedge"><span class="label">Length</span> <input type="number" min="0" id="sheetwidth" required /> {{ getUnits }}</span>
                   <div>
           		<a href="#" class="button add" id="confirmsheet">Add</a>
           		<a href="#" class="button" id="cancelsheet">Cancel</a>
@@ -487,6 +494,57 @@
                 required
               />
               <i><span class="unit-label">inch</span></i>
+            </dd>
+            <dt>Line width</dt>
+            <dd>
+              <input
+                id="exportLineWidthMm"
+                type="number"
+                value="2"
+                min="0.1"
+                max="10"
+                step="any"
+                data-config="exportLineWidthMm"
+                required
+              />
+              <i>mm (every line)</i>
+            </dd>
+            <dt>Cut line colour</dt>
+            <dd>
+              <input
+                id="exportCutColour"
+                type="color"
+                value="#3b1f6e"
+                data-config="exportCutColour"
+              />
+            </dd>
+            <dt>Sew line colour</dt>
+            <dd>
+              <input
+                id="exportSewColour"
+                type="color"
+                value="#4f8a26"
+                data-config="exportSewColour"
+              />
+              <i>dashed</i>
+            </dd>
+            <dt>Grain line colour</dt>
+            <dd>
+              <input
+                id="exportGrainColour"
+                type="color"
+                value="#4f8a26"
+                data-config="exportGrainColour"
+              />
+            </dd>
+            <dt>Sheet border colour</dt>
+            <dd>
+              <input
+                id="exportBorderColour"
+                type="color"
+                value="#ffffff"
+                data-config="exportBorderColour"
+              />
             </dd>
             <dt>Calibration square</dt>
             <dd>
@@ -2793,9 +2851,10 @@
               Boost.Polygon © Glen Joseph Fernandes.
             </li>
             <li>
-              <strong>Other libraries</strong> (Ractive, interact.js © Taye
-              Adeyemi, FileSaver.js © Eli Grey and others) keep their licence
-              notices in their own files.
+              <strong>Other parts</strong> (Ractive, interact.js © Taye
+              Adeyemi, the Lato font © Łukasz Dziedzic under the SIL Open Font
+              License, and others) keep their licence notices in their own
+              files.
             </li>
           </ul>
           <p class="info-small">

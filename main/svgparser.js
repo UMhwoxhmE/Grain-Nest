@@ -151,6 +151,17 @@ export class SvgParser {
 
 			root.setAttribute('transform', transform);
 
+			// v1.5.0: the shapes are scaled into the app's units (baked in by
+			// cleanInput), so scale the viewBox by the same factor or the import
+			// preview shows a magnified corner of the drawing (every mm file,
+			// e.g. the pattern-grading output, came in ~3.8x too big there).
+			var k = scale/localscale;
+			if(k !== 1 && viewBox.length >= 4){
+				root.setAttribute('viewBox', viewBox.slice(0, 4).map(function(v){
+					return String(Number(v) * k);
+				}).join(' '));
+			}
+
 			this.conf.scale *= scale/localscale;
 		}
 

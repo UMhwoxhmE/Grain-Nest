@@ -53,6 +53,15 @@ export const DEFAULT_CONFIG: Readonly<UIConfig> = {
   // user can verify print/projection scale at a glance.
   exportScalingBox: true,
   exportScalingBoxSizeInches: 4,
+  // v1.5.0: every line in the export is the same width (mm) and the cut,
+  // sew and grain lines and the sheet border each have a colour — the
+  // app's aubergine and moss by default, border white (shows up well when
+  // projected).
+  exportLineWidthMm: 2,
+  exportCutColour: "#3b1f6e",
+  exportSewColour: "#4f8a26",
+  exportGrainColour: "#4f8a26",
+  exportBorderColour: "#ffffff",
   // §9.3.9 / phase-5r: default per-piece seam allowance (mm) applied to
   // imported pieces, so sew lines appear by default (testing round 4).
   defaultSeamAllowanceMm: 12,

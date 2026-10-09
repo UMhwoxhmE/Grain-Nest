@@ -259,6 +259,8 @@ export type Part = {
    * `.gnp` so a loaded project can re-fold.
    */
   foldLine?: { x0: number; y0: number; ang: number };
+  /** v1.5.0: fold edge marked in the app (drawing coordinates). */
+  markedFold?: { x0: number; y0: number; ang: number };
   /**
    * §9.3.9: per-piece seam allowance in **millimetres** (canonical: stored
    * in mm so recalibrating the scale or toggling display units never

@@ -4,7 +4,6 @@ const fs = require("graceful-fs");
 const path = require("path");
 const os = require("os");
 const url = require("url");
-const { loadPresets, savePreset, deletePreset } = require("./presets");
 const NotificationService = require('./notification-service');
 require("events").EventEmitter.defaultMaxListeners = 30;
 
@@ -375,17 +374,6 @@ ipcMain.on("test", (event, payload) => {
   global.test = payload;
 });
 
-ipcMain.handle("load-presets", () => {
-  return loadPresets();
-});
-
-ipcMain.handle("save-preset", (event, name, config) => {
-  savePreset(name, config);
-});
-
-ipcMain.handle("delete-preset", (event, name) => {
-  deletePreset(name);
-});
 
 // Handle notification window events
 ipcMain.on('get-notification-data', (event) => {
