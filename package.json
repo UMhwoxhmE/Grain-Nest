@@ -108,5 +108,11 @@
       "category": "public.app-category.utilities",
       "icon": "icon.icns"
     }
-  }
+  },
+  "contributors": [
+    {
+      "name": "Josef Fröhle",
+      "email": "github@josef-froehle.de"
+    }
+  ]
 }

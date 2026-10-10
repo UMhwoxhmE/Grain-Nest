@@ -59,8 +59,9 @@ Playwright tests.
 ## Built on
 
 Grain-Nest is a fork of
-[deepnest-next](https://github.com/deepnest-next/deepnest), which grew out
-of Jack Qiao's [SVGnest](https://github.com/Jack000/SVGnest) and
+[deepnest-next](https://github.com/deepnest-next/deepnest), maintained by
+Josef Fröhle, which grew out of Jack Qiao's
+[SVGnest](https://github.com/Jack000/SVGnest) and
 [Deepnest](https://github.com/Jack000/Deepnest) (via the Dogthemachine and
 cmidgley forks). The nesting engine — the no-fit-polygon solver, the
 genetic algorithm and the SVG import — comes from those projects,
@@ -68,6 +69,25 @@ including deepnest-next's `@deepnest/calculate-nfp` package; Grain-Nest
 adds the grain and dressmaking features above. Earlier versions also used
 deepnest-next's SVG preprocessor (`@deepnest/svg-preprocessor`) to clean
 up imported files.
+
+### Credits and history
+
+Thank you to everyone whose work this is built on: Josef Fröhle, abebeos
+and the other deepnest-next contributors; cmidgley, Dogthemachine and the
+earlier Deepnest forks; and Jack Qiao, who wrote SVGnest and Deepnest.
+
+This repository's history starts with deepnest-next's own (up to its
+commit `798262f`, April 2026), so every earlier contribution is kept in
+the commit history under its author's name. Grain-Nest's changes come
+after it.
+
+### Changes from deepnest-next
+
+As the GNU GPL asks: Grain-Nest has modified deepnest-next's files,
+including the GPL-licensed nesting module `main/deepnest.js`, from May
+2026 onwards — grain rules, cutting on the fold, mirrored pieces, nap,
+seam allowances, cut lists and the SVG export. The commit history shows
+each change and when it was made.
 
 ## Licence
 

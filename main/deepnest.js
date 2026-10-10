@@ -1,6 +1,10 @@
 /*!
  * Deepnest
  * Licensed under GPLv3
+ *
+ * Modified for Grain-Nest from May 2026 onwards (grain rules, cutting on
+ * the fold, mirrored pieces, nap, seam allowances). See the repository's
+ * commit history for each change.
  */
 
 import { Point } from '../build/util/point.js';
